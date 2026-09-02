@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/
+.expo/
+*.min.js
+*.min.css
+.env*

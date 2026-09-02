@@ -1,0 +1,17 @@
+{
+  "name": "falcon-office-monorepo",
+  "private": true,
+  "workspaces": [
+    "mobile",
+    "backend",
+    "admin",
+    "database"
+  ],
+  "scripts": {
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.0.3"
+  }
+}
