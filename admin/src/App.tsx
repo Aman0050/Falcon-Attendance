@@ -14,7 +14,7 @@ function Navigation() {
   const location = useLocation();
   
   return (
-    <Navbar bg="light" variant="light" expand="lg" className="mb-4">
+    <Navbar bg="dark" variant="dark" expand="lg" className="mb-4 shadow-sm">
       <Container>
         <Navbar.Brand as={Link} to="/" className="d-flex align-items-center">
           <img
@@ -36,10 +36,10 @@ function Navigation() {
             <Nav.Link as={Link} to="/reports" active={location.pathname === '/reports'}>Reports</Nav.Link>
             <Nav.Link as={Link} to="/settings" active={location.pathname === '/settings'}>Settings</Nav.Link>
           </Nav>
-          <Navbar.Text className="me-3 fw-bold" style={{ color: 'var(--text-main)' }}>
+          <Navbar.Text className="me-3 fw-bold text-light">
             Signed in as: {user?.name}
           </Navbar.Text>
-          <Button variant="primary" size="sm" onClick={logout}>Logout</Button>
+          <Button variant="outline-light" size="sm" onClick={logout}>Logout</Button>
         </Navbar.Collapse>
       </Container>
     </Navbar>
