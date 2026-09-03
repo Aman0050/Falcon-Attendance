@@ -99,7 +99,8 @@ export function calculateStatus(
     if (currentTime > officeEnd) {
       result.status = 'CHECKOUT_MISSING';
     } else {
-      result.status = 'PRESENT'; // Present conditionally while working
+      // Preserve HALF_DAY_LEAVE if applicable, otherwise PRESENT
+      result.status = hasHalfDayLeave ? 'HALF_DAY_LEAVE' : 'PRESENT';
     }
     return result;
   }
