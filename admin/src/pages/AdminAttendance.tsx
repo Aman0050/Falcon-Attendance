@@ -132,8 +132,6 @@ export default function AdminAttendance() {
                   <option>Present</option>
                   <option>Absent</option>
                   <option>Late</option>
-                  <option>Checked In</option>
-                  <option>Checked Out</option>
                 </Form.Select>
               </Form.Group>
             </Col>
