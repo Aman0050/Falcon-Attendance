@@ -4,6 +4,8 @@ import { query } from '../db';
 import { calculateStatus, getAttendanceSettings } from '../services/attendanceStatusService';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
 
 export const getAttendanceReport = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -37,7 +39,7 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
     const actualEndStr = endDateStr > todayStr ? todayStr : endDateStr;
 
     // 2. Fetch Employees
-    let empQuery = `SELECT id, name, email FROM users WHERE status = 'active'`;
+    let empQuery = `SELECT id, name, email, employee_id FROM users WHERE status = 'active'`;
     const empParams: any[] = [];
     if (employeeId) {
       empParams.push(employeeId);
@@ -205,6 +207,7 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
           id: emp.id,
           name: emp.name,
           email: emp.email,
+          empId: emp.employee_id,
           summary: empSummary,
           daily: dailyRecords
         });
@@ -263,55 +266,74 @@ async function exportExcel(res: Response, summary: any, employeeReports: any[], 
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Falcon Info Solutions';
   
-  // Sheet 1: Summary
-  const sumSheet = workbook.addWorksheet('Summary');
-  sumSheet.columns = [
-    { header: 'Employee', key: 'name', width: 25 },
-    { header: 'Email', key: 'email', width: 25 },
-    { header: 'Present', key: 'p', width: 10 },
-    { header: 'Absent', key: 'a', width: 10 },
-    { header: 'Half Day', key: 'hd', width: 10 },
-    { header: 'Leave', key: 'l', width: 10 },
-    { header: 'Late', key: 'late', width: 10 },
-    { header: 'Total Hours', key: 'hrs', width: 15 },
-    { header: 'Att %', key: 'pct', width: 10 }
-  ];
-  sumSheet.getRow(1).font = { bold: true };
+  const sheet = workbook.addWorksheet('Attendance Report');
   
-  for (const er of employeeReports) {
-    sumSheet.addRow({
-      name: er.name, email: er.email,
-      p: er.summary.present, a: er.summary.absent, hd: er.summary.halfDay,
-      l: er.summary.onLeave, late: er.summary.late,
-      hrs: formatMins(er.summary.totalWorkingMinutes),
-      pct: `${er.summary.attendancePercentage}%`
-    });
+  try {
+    const logoPath = path.join(process.cwd(), '../mobile/assets/logo.png');
+    if (fs.existsSync(logoPath)) {
+      const logoId = workbook.addImage({
+        buffer: fs.readFileSync(logoPath),
+        extension: 'png'
+      });
+      sheet.addImage(logoId, {
+        tl: { col: 0, row: 0 },
+        ext: { width: 100, height: 100 }
+      });
+    }
+  } catch(e) {
+    console.error('Logo add failed', e);
   }
 
-  // Sheet 2: Daily
-  const dailySheet = workbook.addWorksheet('Daily Details');
-  dailySheet.columns = [
-    { header: 'Date', key: 'date', width: 15 },
-    { header: 'Day', key: 'day', width: 12 },
-    { header: 'Employee', key: 'emp', width: 25 },
-    { header: 'Status', key: 'status', width: 15 },
-    { header: 'Check-in', key: 'in', width: 12 },
-    { header: 'Check-out', key: 'out', width: 12 },
-    { header: 'Working Hrs', key: 'hrs', width: 15 },
-    { header: 'Leave/Holiday', key: 'info', width: 20 }
-  ];
-  dailySheet.getRow(1).font = { bold: true };
+  sheet.getCell('C1').value = 'Falcon Info Solutions';
+  sheet.getCell('C1').font = { size: 16, bold: true };
+  sheet.getCell('C2').value = `Report generation date: ${new Date().toLocaleDateString('en-US', { timeZone: 'Asia/Kolkata' })}`;
+  
+  sheet.getCell('A4').value = 'Summary Statistics';
+  sheet.getCell('A4').font = { bold: true };
+  sheet.getCell('A5').value = 'Total working days'; sheet.getCell('B5').value = summary.totalExpectedDays;
+  sheet.getCell('A6').value = 'Present days'; sheet.getCell('B6').value = summary.present;
+  sheet.getCell('A7').value = 'Absent days'; sheet.getCell('B7').value = summary.absent;
+  sheet.getCell('A8').value = 'Leave days'; sheet.getCell('B8').value = summary.onLeave;
+  sheet.getCell('A9').value = 'Late arrivals'; sheet.getCell('B9').value = summary.late;
+  sheet.getCell('A10').value = 'Total working hours'; sheet.getCell('B10').value = formatMins(summary.totalWorkingMinutes);
+  sheet.getCell('A11').value = 'Overtime'; sheet.getCell('B11').value = '0h 0m';
+
+  sheet.addRow([]);
+  sheet.addRow([]);
+
+  // Table Data
+  const headerRow = sheet.addRow(['Employee ID', 'Name', 'Date', 'Check In', 'Check Out', 'Status', 'Location']);
+  headerRow.font = { bold: true };
+  
+  sheet.getColumn(1).width = 15;
+  sheet.getColumn(2).width = 25;
+  sheet.getColumn(3).width = 15;
+  sheet.getColumn(4).width = 15;
+  sheet.getColumn(5).width = 15;
+  sheet.getColumn(6).width = 15;
+  sheet.getColumn(7).width = 20;
 
   for (const er of employeeReports) {
     for (const d of er.daily) {
-      const inTime = d.checkIn ? new Date(d.checkIn).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
-      const outTime = d.checkOut ? new Date(d.checkOut).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '';
-      dailySheet.addRow({
-        date: d.date, day: d.day, emp: er.name,
-        status: d.status, in: inTime, out: outTime,
-        hrs: formatMins(d.workingMinutes),
-        info: d.leaveType || d.holidayName || ''
-      });
+      const inTime = d.checkIn ? new Date(d.checkIn).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '-';
+      const outTime = d.checkOut ? new Date(d.checkOut).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' }) : '-';
+      let loc = '-';
+      if (d.status === 'PRESENT' || d.status === 'HALF_DAY') {
+        loc = 'Office'; // Standard default
+      }
+      
+      let st = d.status.charAt(0).toUpperCase() + d.status.slice(1).toLowerCase().replace('_', ' ');
+      if (d.status === 'ON_LEAVE' || d.status === 'HALF_DAY_LEAVE') st = 'Leave';
+      
+      sheet.addRow([
+        er.empId || `EMP${String(er.id).padStart(3, '0')}`,
+        er.name,
+        d.date,
+        inTime,
+        outTime,
+        st,
+        loc
+      ]);
     }
   }
 
