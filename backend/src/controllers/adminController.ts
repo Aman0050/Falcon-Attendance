@@ -53,54 +53,67 @@ export const getAttendance = async (req: AuthRequest, res: Response): Promise<vo
         WHERE lr.status = 'APPROVED'
       ),
       combined AS (
-        SELECT a.attendance_date, a.employee_id
+        ${date ? `
+        SELECT $1::date as attendance_date, u.id as employee_id,
+               COALESCE(att.status, CASE WHEN el.employee_id IS NOT NULL THEN 'ON_LEAVE' ELSE 'ABSENT' END) as computed_status,
+               att.check_in, att.check_out, att.working_minutes
+        FROM users u
+        LEFT JOIN attendance att ON u.id = att.employee_id AND att.attendance_date = $1::date
+        LEFT JOIN expanded_leaves el ON u.id = el.employee_id AND el.attendance_date = $1::date
+        WHERE u.role != 'admin' AND u.status = 'active'
+        ` : `
+        SELECT a.attendance_date, a.employee_id, a.status as computed_status, a.check_in, a.check_out, a.working_minutes
         FROM attendance a
         UNION ALL
-        SELECT el.attendance_date, el.employee_id
+        SELECT el.attendance_date, el.employee_id, 'ON LEAVE' as computed_status, NULL as check_in, NULL as check_out, 0 as working_minutes
         FROM expanded_leaves el
         WHERE NOT EXISTS (
           SELECT 1 FROM attendance a 
           WHERE a.employee_id = el.employee_id AND a.attendance_date = el.attendance_date
         )
+        `}
       )
       SELECT COUNT(*) 
       FROM combined a
       JOIN users u ON a.employee_id = u.id
-      ${filterQuery}
+      ${filterQuery.replace(/a\.status/g, 'a.computed_status')}
     `, queryParams);
     const total = parseInt(countRes.rows[0].count);
     const totalPages = Math.ceil(total / limit);
 
     const histRes = await query(`
       WITH expanded_leaves AS (
-        SELECT 
-          -lr.id as id, 
-          d::date as attendance_date,
-          NULL::timestamp with time zone as check_in,
-          NULL::timestamp with time zone as check_out,
-          0 as working_minutes,
-          'ON LEAVE'::varchar as status,
-          lr.employee_id
+        SELECT d::date as attendance_date, lr.employee_id
         FROM leave_requests lr
         JOIN generate_series(lr.start_date, lr.end_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
       ),
       combined AS (
-        SELECT id, attendance_date, check_in, check_out, working_minutes, status, employee_id
-        FROM attendance
+        ${date ? `
+        SELECT NULL::integer as id, $1::date as attendance_date, u.id as employee_id,
+               COALESCE(att.status, CASE WHEN el.employee_id IS NOT NULL THEN 'ON LEAVE' ELSE 'ABSENT' END) as computed_status,
+               att.check_in, att.check_out, att.working_minutes
+        FROM users u
+        LEFT JOIN attendance att ON u.id = att.employee_id AND att.attendance_date = $1::date
+        LEFT JOIN expanded_leaves el ON u.id = el.employee_id AND el.attendance_date = $1::date
+        WHERE u.role != 'admin' AND u.status = 'active'
+        ` : `
+        SELECT a.id, a.attendance_date, a.employee_id, a.status as computed_status, a.check_in, a.check_out, a.working_minutes
+        FROM attendance a
         UNION ALL
-        SELECT id, attendance_date, check_in, check_out, working_minutes, status, employee_id
+        SELECT NULL::integer as id, el.attendance_date, el.employee_id, 'ON LEAVE' as computed_status, NULL as check_in, NULL as check_out, 0 as working_minutes
         FROM expanded_leaves el
         WHERE NOT EXISTS (
           SELECT 1 FROM attendance a 
           WHERE a.employee_id = el.employee_id AND a.attendance_date = el.attendance_date
         )
+        `}
       )
-      SELECT a.id, a.attendance_date, a.check_in, a.check_out, a.working_minutes, a.status,
+      SELECT a.id, a.attendance_date, a.check_in, a.check_out, a.working_minutes, a.computed_status as status,
              u.name as employee_name, u.employee_id as employee_code
       FROM combined a
       JOIN users u ON a.employee_id = u.id
-      ${filterQuery}
+      ${filterQuery.replace(/a\.status/g, 'a.computed_status')}
       ORDER BY a.attendance_date DESC, a.check_in DESC NULLS LAST
       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
     `, [...queryParams, limit, offset]);
@@ -139,26 +152,19 @@ export const getDailySummary = async (req: AuthRequest, res: Response): Promise<
     const totalEmployees = parseInt(usersRes.rows[0].count);
 
     const attRes = await query(`
-      WITH expanded_leaves AS (
-        SELECT d::date as attendance_date, 'ON LEAVE'::varchar as status, NULL::timestamp with time zone as check_out, lr.employee_id
+      SELECT 
+        u.id,
+        COALESCE(a.status, CASE WHEN el.status IS NOT NULL THEN el.status ELSE 'ABSENT' END) as status,
+        a.check_out
+      FROM users u
+      LEFT JOIN attendance a ON u.id = a.employee_id AND a.attendance_date = $1
+      LEFT JOIN (
+        SELECT d::date as attendance_date, 'ON LEAVE'::varchar as status, lr.employee_id
         FROM leave_requests lr
         JOIN generate_series(lr.start_date, lr.end_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
-      ),
-      combined AS (
-        SELECT status, check_out, attendance_date, employee_id
-        FROM attendance
-        UNION ALL
-        SELECT status, check_out, attendance_date, employee_id
-        FROM expanded_leaves el
-        WHERE NOT EXISTS (
-          SELECT 1 FROM attendance a 
-          WHERE a.employee_id = el.employee_id AND a.attendance_date = el.attendance_date
-        )
-      )
-      SELECT status, check_out 
-      FROM combined 
-      WHERE attendance_date = $1
+      ) el ON u.id = el.employee_id AND el.attendance_date = $1
+      WHERE u.role != 'admin' AND u.status = 'active'
     `, [date]);
 
     let present = 0;
