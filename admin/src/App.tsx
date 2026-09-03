@@ -25,7 +25,7 @@ function Navigation() {
             className="d-inline-block align-top me-2 rounded-circle"
             style={{ objectFit: 'cover' }}
           />
-          Falcon Office Admin
+          Falcon INFO SOLUTIONS Admin
         </Navbar.Brand>
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
         <Navbar.Collapse id="basic-navbar-nav">
@@ -49,8 +49,8 @@ function Navigation() {
 function Dashboard() {
   return (
     <Container className="mt-5 text-center">
-      <img src="/logo.png" alt="Falcon Logo" width="120" className="mb-4 shadow-sm rounded-circle" style={{ objectFit: 'cover' }} />
-      <h1 className="fw-bold">Welcome to Falcon Office</h1>
+      <img src="/logo.png" alt="Falcon Logo" width="200" className="mb-4 shadow-sm rounded-circle" style={{ objectFit: 'cover' }} />
+      <h1 className="fw-bold">Welcome to Falcon INFO SOLUTIONS</h1>
       <p className="text-muted fs-5">Admin dashboard is ready and secured.</p>
     </Container>
   );
