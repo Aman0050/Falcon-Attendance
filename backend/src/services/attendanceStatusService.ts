@@ -1,6 +1,6 @@
 import { query } from '../db';
 
-export type AttendanceStatus = 'NOT_MARKED' | 'PRESENT' | 'HALF_DAY' | 'ABSENT' | 'ON_LEAVE' | 'HALF_DAY_LEAVE' | 'CHECKOUT_MISSING' | 'INSUFFICIENT_HOURS';
+export type AttendanceStatus = 'NOT_MARKED' | 'PRESENT' | 'HALF_DAY' | 'ABSENT' | 'ON_LEAVE' | 'HALF_DAY_LEAVE' | 'CHECKOUT_MISSING' | 'INSUFFICIENT_HOURS' | 'SUNDAY' | 'HOLIDAY';
 
 export interface AttendanceResult {
   status: AttendanceStatus;
@@ -44,17 +44,18 @@ export function calculateStatus(
 
   // Parse time configuration
   const parseTime = (timeStr: string) => {
-    const [h, m] = timeStr.split(':').map(Number);
-    const d = new Date(dateStr + 'T00:00:00+05:30'); // Start of day in IST
-    d.setHours(h, m, 0, 0);
-    return d;
+    const parts = timeStr.split(':');
+    const h = parts[0].padStart(2, '0');
+    const m = parts[1].padStart(2, '0');
+    const s = parts[2] ? parts[2].padStart(2, '0') : '00';
+    return new Date(`${dateStr}T${h}:${m}:${s}+05:30`);
   };
 
   const lateThreshold = parseTime(settings.late_threshold);
   const absenceCutoff = parseTime(settings.absence_cutoff);
   const officeEnd = parseTime(settings.office_end);
 
-  const isWeekend = new Date(dateStr).getDay() === 0; // Sunday only
+  const isWeekend = new Date(`${dateStr}T12:00:00Z`).getUTCDay() === 0; // Sunday only
   const isHoliday = !!holiday;
 
   // 1. No check-in scenario
