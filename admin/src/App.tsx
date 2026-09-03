@@ -22,8 +22,8 @@ function Navigation() {
             alt="Falcon Logo"
             width="30"
             height="30"
-            className="d-inline-block align-top me-2 rounded-circle"
-            style={{ objectFit: 'cover' }}
+            className="d-inline-block align-top me-2"
+            style={{ objectFit: 'contain' }}
           />
           Falcon INFO SOLUTIONS Admin
         </Navbar.Brand>
@@ -49,7 +49,7 @@ function Navigation() {
 function Dashboard() {
   return (
     <Container className="mt-5 text-center">
-      <img src="/logo.png" alt="Falcon Logo" width="200" className="mb-4 shadow-sm rounded-circle" style={{ objectFit: 'cover' }} />
+      <img src="/logo.png" alt="Falcon Logo" width="200" className="mb-4 shadow-sm" style={{ objectFit: 'contain' }} />
       <h1 className="fw-bold">Welcome to Falcon INFO SOLUTIONS</h1>
       <p className="text-muted fs-5">Admin dashboard is ready and secured.</p>
     </Container>
