@@ -46,7 +46,7 @@ export default function AdminReports() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {
-        setEmployeesList(res.data.data.employees || res.data.data);
+        setEmployeesList(res.data.data.items || res.data.data.employees || (Array.isArray(res.data.data) ? res.data.data : []));
       }
     } catch (e) {
       console.error(e);
