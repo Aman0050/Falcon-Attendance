@@ -166,7 +166,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
   try {
     const parsed = createEmployeeSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
       return;
     }
 
@@ -226,7 +226,7 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
     const id = parseInt(req.params.id);
     const parsed = editEmployeeSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
       return;
     }
 

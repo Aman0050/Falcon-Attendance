@@ -56,7 +56,7 @@ export const applyLeave = async (req: AuthRequest, res: Response): Promise<void>
     const parsed = applyLeaveSchema.safeParse(req.body);
     
     if (!parsed.success) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
       return;
     }
 

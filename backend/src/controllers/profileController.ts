@@ -47,7 +47,7 @@ export const updateProfile = async (req: AuthRequest, res: Response): Promise<vo
     const parsed = updateProfileSchema.safeParse(req.body);
     
     if (!parsed.success) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
       return;
     }
 
@@ -92,7 +92,7 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
     const parsed = changePasswordSchema.safeParse(req.body);
     
     if (!parsed.success) {
-      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
       return;
     }
 
