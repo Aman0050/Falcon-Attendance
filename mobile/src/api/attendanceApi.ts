@@ -1,0 +1,101 @@
+import axios from 'axios';
+import { Platform } from 'react-native';
+import { LocationValidationResponse } from './locationApi';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000');
+
+export interface AttendanceRecord {
+  attendanceId: number;
+  date: string;
+  checkIn: string;
+  checkOut: string | null;
+  workingMinutes: number;
+  status: string;
+  isLate?: boolean;
+  holidayName?: string | null;
+  leaveType?: string | null;
+}
+
+export interface TodayResponse {
+  success: boolean;
+  data?: {
+    attendance: AttendanceRecord | null;
+  };
+  error?: {
+    code: string;
+    message: string;
+  };
+}
+
+export const checkIn = async (latitude: number, longitude: number, accuracy: number, token: string) => {
+  try {
+    const res = await axios.post(`${API_URL}/api/attendance/check-in`, 
+      { latitude, longitude, accuracy },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
+export const checkOut = async (latitude: number, longitude: number, accuracy: number, token: string) => {
+  try {
+    const res = await axios.post(`${API_URL}/api/attendance/check-out`, 
+      { latitude, longitude, accuracy },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
+export const getTodayAttendance = async (token: string): Promise<TodayResponse> => {
+  try {
+    const res = await axios.get(`${API_URL}/api/attendance/today`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
+export const getAttendanceHistory = async (token: string, page = 1, limit = 20, year?: number, month?: number) => {
+  try {
+    let url = `${API_URL}/api/attendance/history?page=${page}&limit=${limit}`;
+    if (year !== undefined && month !== undefined) {
+      url += `&year=${year}&month=${month}`;
+    }
+    const res = await axios.get(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
+export const getAttendanceSummary = async (token: string, year: number, month: number) => {
+  try {
+    const res = await axios.get(`${API_URL}/api/attendance/summary?year=${year}&month=${month}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
+export const getAttendanceCalendar = async (token: string, year: number, month: number) => {
+  try {
+    const res = await axios.get(`${API_URL}/api/attendance/calendar?year=${year}&month=${month}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'No internet connection.' } };
+  }
+};
+
