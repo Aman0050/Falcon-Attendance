@@ -24,7 +24,7 @@ export default function AdminEmployees() {
   const [tempPassword, setTempPassword] = useState('');
 
   // Form State
-  const [formData, setFormData] = useState({ name: '', email: '', phone: '', department: '', designation: '', joiningDate: '', role: 'employee' });
+  const [formData, setFormData] = useState({ name: '', email: '', phone: '', department: '', designation: '', joiningDate: '', role: 'employee', customEmployeeId: '', password: '' });
 
   const fetchRecords = async (pageNum = 1) => {
     setLoading(true);
@@ -66,7 +66,7 @@ export default function AdminEmployees() {
 
   const openAdd = () => {
     setSelectedUser(null);
-    setFormData({ name: '', email: '', phone: '', department: '', designation: '', joiningDate: '', role: 'employee' });
+    setFormData({ name: '', email: '', phone: '', department: '', designation: '', joiningDate: '', role: 'employee', customEmployeeId: '', password: '' });
     setShowForm(true);
   };
 
@@ -76,7 +76,9 @@ export default function AdminEmployees() {
       name: user.name, email: user.email, phone: user.phone || '', 
       department: user.department || '', designation: user.designation || '', 
       joiningDate: user.joiningDate ? new Date(user.joiningDate).toISOString().split('T')[0] : '', 
-      role: user.role
+      role: user.role,
+      customEmployeeId: user.employee_id || '',
+      password: '' // Don't populate password on edit
     });
     setShowForm(true);
   };
@@ -89,7 +91,9 @@ export default function AdminEmployees() {
       const url = selectedUser ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/employees/${selectedUser.id}` : `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/employees`;
       
       // If editing, don't send email if we don't support email changes natively
-      const payload = { ...formData };
+      const payload: any = { ...formData };
+      if (!payload.password) delete payload.password;
+      if (!payload.customEmployeeId) delete payload.customEmployeeId;
       
       const res = await fetch(url, {
         method,
@@ -270,7 +274,11 @@ export default function AdminEmployees() {
         <Modal.Body>
           <Form>
             <Form.Group className="mb-3"><Form.Label>Name</Form.Label><Form.Control value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} /></Form.Group>
+            <Form.Group className="mb-3"><Form.Label>Username / Employee ID</Form.Label><Form.Control value={formData.customEmployeeId} onChange={e=>setFormData({...formData, customEmployeeId: e.target.value})} disabled={!!selectedUser} placeholder="e.g. EMP-101" /></Form.Group>
             <Form.Group className="mb-3"><Form.Label>Email</Form.Label><Form.Control value={formData.email} onChange={e=>setFormData({...formData, email: e.target.value})} disabled={!!selectedUser} /></Form.Group>
+            {!selectedUser && (
+              <Form.Group className="mb-3"><Form.Label>Password</Form.Label><Form.Control type="password" value={formData.password} onChange={e=>setFormData({...formData, password: e.target.value})} placeholder="Leave blank to auto-generate" /></Form.Group>
+            )}
             <Form.Group className="mb-3"><Form.Label>Phone</Form.Label><Form.Control value={formData.phone} onChange={e=>setFormData({...formData, phone: e.target.value})} /></Form.Group>
             <Form.Group className="mb-3"><Form.Label>Department</Form.Label><Form.Control value={formData.department} onChange={e=>setFormData({...formData, department: e.target.value})} /></Form.Group>
             <Form.Group className="mb-3"><Form.Label>Designation</Form.Label><Form.Control value={formData.designation} onChange={e=>setFormData({...formData, designation: e.target.value})} /></Form.Group>
