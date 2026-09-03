@@ -105,9 +105,9 @@ export default function AdminReports() {
     setPage(1);
   };
 
-  const handleExport = async (type: 'excel' | 'pdf') => {
+  const handleExport = (type: 'excel' | 'pdf') => {
     try {
-      let url = `${API_URL}/api/admin/reports/attendance?export=${type}&sort=${sortField}&order=${sortOrder}`;
+      let url = `${API_URL}/api/admin/reports/attendance?export=${type}&sort=${sortField}&order=${sortOrder}&token=${token}`;
       if (filterMode === 'month') {
         url += `&month=${month}&year=${year}`;
       } else {
@@ -117,21 +117,7 @@ export default function AdminReports() {
       if (selectedStatus && selectedStatus !== 'All') url += `&status=${selectedStatus}`;
       if (search) url += `&search=${search}`;
 
-      const res = await axios.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: 'blob'
-      });
-
-      const blob = new Blob([res.data], { type: res.headers['content-type'] as string });
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      const extension = type === 'excel' ? 'xlsx' : 'pdf';
-      const rangeStr = filterMode === 'month' ? `${year}-${month}` : `${fromDate}-to-${toDate}`;
-      link.download = `attendance-report-${rangeStr}.${extension}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      window.open(url, '_blank');
     } catch (err) {
       alert(`Unable to export ${type.toUpperCase()}`);
     }
