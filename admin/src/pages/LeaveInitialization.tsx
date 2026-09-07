@@ -19,7 +19,7 @@ export default function LeaveInitialization() {
   const checkInit = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/admin/leave/is-initialized`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/leave/is-initialized`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.data.initialized) {
@@ -39,7 +39,7 @@ export default function LeaveInitialization() {
   const fetchEmployees = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/admin/employees?limit=1000`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/employees?limit=1000`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setEmployees(res.data.data.items.map((e: any) => ({
@@ -67,7 +67,7 @@ export default function LeaveInitialization() {
     
     try {
       const token = localStorage.getItem('token');
-      await axios.post(`${import.meta.env.VITE_API_URL}/admin/leave/initialize`, {
+      await axios.post(`${import.meta.env.VITE_API_URL}/api/admin/leave/initialize`, {
         quarter,
         employees: employees.map(e => ({ employeeId: e.id, usedPaidLeave: e.usedPaidLeave }))
       }, {

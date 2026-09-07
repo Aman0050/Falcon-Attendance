@@ -27,7 +27,7 @@ export default function AdminLeave() {
   const checkInit = async () => {
     try {
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/admin/leave/is-initialized`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/leave/is-initialized`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.data.data.initialized) {
@@ -42,7 +42,7 @@ export default function AdminLeave() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/admin/leave?page=${page}&status=${statusFilter}`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/leave?page=${page}&status=${statusFilter}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setLeaves(res.data.data.items);
@@ -58,7 +58,7 @@ export default function AdminLeave() {
     if (!window.confirm('Are you sure you want to approve this leave?')) return;
     try {
       const token = localStorage.getItem('token');
-      await axios.patch(`${import.meta.env.VITE_API_URL}/admin/leave/${id}/approve`, {}, {
+      await axios.patch(`${import.meta.env.VITE_API_URL}/api/admin/leave/${id}/approve`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       fetchLeaves();
@@ -74,7 +74,7 @@ export default function AdminLeave() {
     }
     try {
       const token = localStorage.getItem('token');
-      await axios.patch(`${import.meta.env.VITE_API_URL}/admin/leave/${selectedLeave}/reject`, { comment: rejectReason }, {
+      await axios.patch(`${import.meta.env.VITE_API_URL}/api/admin/leave/${selectedLeave}/reject`, { comment: rejectReason }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setShowRejectModal(false);
