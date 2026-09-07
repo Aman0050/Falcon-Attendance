@@ -319,6 +319,16 @@ export default function AdminEmployees() {
                 <Card className="mb-2"><Card.Body>
                   <h6>Leaves</h6>
                   Approved: {detailData.leaveSummary.approved} | Pending: {detailData.leaveSummary.pending}
+                  {detailData.leaveBalances && (
+                    <div className="mt-2">
+                      <p className="mb-1"><strong>Balance:</strong> {detailData.leaveBalances.currentBalance}</p>
+                      <p className="mb-1"><strong>Used Paid:</strong> {detailData.leaveBalances.usedPaidLeave} | <strong>LWP:</strong> {detailData.leaveBalances.leaveWithoutPay}</p>
+                      <p className="mb-0"><strong>Last Credit:</strong> {detailData.leaveBalances.lastCreditDate ? new Date(detailData.leaveBalances.lastCreditDate).toLocaleDateString() : 'N/A'}</p>
+                    </div>
+                  )}
+                  {!detailData.leaveBalances && (
+                    <p className="mt-2 mb-0 text-muted"><em>No leave balance found (not eligible or initialized).</em></p>
+                  )}
                 </Card.Body></Card>
               </Col>
             </Row>

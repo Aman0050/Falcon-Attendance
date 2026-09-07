@@ -6,14 +6,13 @@ import { getLeaveBalances, getLeaveHistory, applyLeave, cancelLeaveRequest, Leav
 export default function LeaveScreen() {
   const { token } = useAuth();
   
-  const [balances, setBalances] = useState<LeaveBalance[]>([]);
+  const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [history, setHistory] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [showApplyModal, setShowApplyModal] = useState(false);
 
   // Form states
-  const [leaveType, setLeaveType] = useState(1); // 1: Casual, 2: Sick, 3: Earned
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [reason, setReason] = useState('');
@@ -25,7 +24,7 @@ export default function LeaveScreen() {
       getLeaveBalances(token),
       getLeaveHistory(token, 1)
     ]);
-    if (balRes.success) setBalances(balRes.data);
+    if (balRes.success) setBalance(balRes.data);
     if (histRes.success) setHistory(histRes.data.items);
     setLoading(false);
   };
@@ -40,8 +39,38 @@ export default function LeaveScreen() {
       Alert.alert('Error', 'Reason must be at least 3 characters.');
       return;
     }
+    
+    // Check if total days > balance and show confirmation
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (start > end) {
+      Alert.alert('Error', 'Start date must be before end date.');
+      return;
+    }
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    
+    const available = balance?.currentBalance || 0;
+    
+    if (totalDays > available) {
+      const lwp = totalDays - available;
+      Alert.alert(
+        'Warning', 
+        `You have ${available} days of balance. ${lwp} days will be marked as Leave Without Pay. Proceed?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Confirm', onPress: () => submitLeaveRequest() }
+        ]
+      );
+    } else {
+      submitLeaveRequest();
+    }
+  };
+  
+  const submitLeaveRequest = async () => {
+    if (!token) return;
     setApplying(true);
-    const res = await applyLeave(token, { leaveTypeId: leaveType, startDate, endDate, reason });
+    const res = await applyLeave(token, { startDate, endDate, reason });
     setApplying(false);
     if (res.success) {
       Alert.alert('Success', 'Leave request submitted.');
@@ -67,13 +96,6 @@ export default function LeaveScreen() {
       }}
     ]);
   };
-
-  const renderBalance = ({ item }: { item: LeaveBalance }) => (
-    <View style={styles.balanceCard}>
-      <Text style={styles.balanceType}>{item.leaveType}</Text>
-      <Text style={styles.balanceDays}>{item.remainingDays} days remaining</Text>
-    </View>
-  );
 
   const renderHistory = ({ item }: { item: LeaveRequest }) => (
     <View style={styles.historyCard}>
@@ -106,15 +128,41 @@ export default function LeaveScreen() {
           ListHeaderComponent={(
             <>
               <View style={styles.balancesContainer}>
-                <Text style={styles.sectionTitle}>Leave Balance</Text>
-                <FlatList
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  data={balances}
-                  keyExtractor={(item) => item.leaveType}
-                  renderItem={renderBalance}
-                  style={{ marginBottom: 15 }}
-                />
+                <Text style={styles.sectionTitle}>Leave Overview</Text>
+                
+                {balance && balance.eligible ? (
+                  <View style={styles.dashboardCard}>
+                    <View style={styles.balanceGrid}>
+                      <View style={styles.balanceItem}>
+                        <Text style={styles.balanceLabel}>Annual</Text>
+                        <Text style={styles.balanceValue}>18</Text>
+                      </View>
+                      <View style={styles.balanceItem}>
+                        <Text style={styles.balanceLabel}>Accrued</Text>
+                        <Text style={styles.balanceValue}>{balance.accruedLeave}</Text>
+                      </View>
+                      <View style={styles.balanceItem}>
+                        <Text style={styles.balanceLabel}>Used</Text>
+                        <Text style={styles.balanceValue}>{balance.usedPaidLeave}</Text>
+                      </View>
+                      <View style={styles.balanceItem}>
+                        <Text style={styles.balanceLabel}>Available</Text>
+                        <Text style={[styles.balanceValue, { color: '#28a745' }]}>{balance.currentBalance}</Text>
+                      </View>
+                      <View style={styles.balanceItem}>
+                        <Text style={styles.balanceLabel}>LWP</Text>
+                        <Text style={[styles.balanceValue, { color: '#dc3545' }]}>{balance.leaveWithoutPay}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.footerRow}>
+                      <Text style={styles.footerText}>Next Credit: {balance.lastCreditDate ? 'Q-Next' : 'Not Credited Yet'}</Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.dashboardCard}>
+                    <Text style={styles.notEligibleText}>You are not yet eligible for Paid Leaves or leaves have not been initialized.</Text>
+                  </View>
+                )}
               </View>
               <TouchableOpacity style={styles.applyBtn} onPress={() => setShowApplyModal(true)}>
                 <Text style={styles.applyBtnText}>APPLY FOR LEAVE</Text>
@@ -133,9 +181,6 @@ export default function LeaveScreen() {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Apply for Leave</Text>
-            
-            <Text style={styles.label}>Leave Type (1: Casual, 2: Sick, 3: Earned)</Text>
-            <TextInput style={styles.input} value={leaveType.toString()} onChangeText={t => setLeaveType(parseInt(t) || 1)} keyboardType="numeric" />
             
             <Text style={styles.label}>Start Date (YYYY-MM-DD)</Text>
             <TextInput style={styles.input} value={startDate} onChangeText={setStartDate} />
@@ -164,11 +209,16 @@ export default function LeaveScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f6f8' },
   header: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginVertical: 15 },
-  balancesContainer: { marginBottom: 10 },
+  balancesContainer: { marginBottom: 15 },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 10, color: '#333' },
-  balanceCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginRight: 10, elevation: 2, minWidth: 140, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 3, shadowOffset: { width: 0, height: 1 } },
-  balanceType: { fontSize: 16, fontWeight: 'bold', color: '#007BFF', marginBottom: 5 },
-  balanceDays: { fontSize: 14, color: '#555' },
+  dashboardCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } },
+  balanceGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 10 },
+  balanceItem: { width: '30%', alignItems: 'center', marginBottom: 15 },
+  balanceLabel: { fontSize: 12, color: '#666', marginBottom: 5 },
+  balanceValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
+  footerRow: { borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10, alignItems: 'center' },
+  footerText: { fontSize: 12, color: '#888' },
+  notEligibleText: { textAlign: 'center', color: '#dc3545', marginVertical: 10 },
   applyBtn: { backgroundColor: '#007BFF', padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 20 },
   applyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   historyCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 1 },

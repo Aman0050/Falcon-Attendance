@@ -115,6 +115,8 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
       absent: 0,
       halfDay: 0,
       onLeave: 0,
+      paidLeave: 0,
+      lwp: 0,
       late: 0,
       totalWorkingMinutes: 0,
       attendancePercentage: 0,
@@ -140,7 +142,7 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
 
     for (const emp of employees) {
       let empSummary = {
-        present: 0, absent: 0, halfDay: 0, onLeave: 0, late: 0, totalWorkingMinutes: 0, attendancePercentage: 0, totalExpectedDays: 0
+        present: 0, absent: 0, halfDay: 0, onLeave: 0, paidLeave: 0, lwp: 0, late: 0, totalWorkingMinutes: 0, attendancePercentage: 0, totalExpectedDays: 0
       };
       
       const dailyRecords = [];
@@ -154,8 +156,8 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
         const lve = leaveMap.get(`${emp.id}_${dStr}`);
         
         const result = calculateStatus(dStr, rec, settings, hol, lve, new Date());
-        result.holidayName = (result as any).holidayName || null;
-        result.leaveType = lve ? lve.leave_type : null;
+        (result as any).holidayName = (result as any).holidayName || null;
+        (result as any).leaveType = lve ? lve.leave_type : null;
 
         if (!status || status === 'All' || result.status === status) {
           dailyRecords.push({
@@ -165,8 +167,8 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
             checkIn: result.checkIn ? result.checkIn.toISOString() : null,
             checkOut: result.checkOut ? result.checkOut.toISOString() : null,
             workingMinutes: Math.round(result.workingMinutes),
-            leaveType: result.leaveType,
-            holidayName: result.holidayName,
+            leaveType: (result as any).leaveType,
+            holidayName: (result as any).holidayName,
             isLate: result.isLate
           });
         }
@@ -177,7 +179,11 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
         if (result.status === 'PRESENT') empSummary.present++;
         else if (result.status === 'ABSENT' || result.status === 'INSUFFICIENT_HOURS') empSummary.absent++;
         else if (result.status === 'HALF_DAY') empSummary.halfDay++;
-        else if (result.status === 'ON_LEAVE') empSummary.onLeave++;
+        else if (result.status === 'ON_LEAVE') {
+          empSummary.onLeave++;
+          if ((result as any).leaveType === 'Paid Leave') empSummary.paidLeave++;
+          else if ((result as any).leaveType === 'Leave Without Pay') empSummary.lwp++;
+        }
         
         if (result.isLate) empSummary.late++;
         empSummary.totalWorkingMinutes += result.workingMinutes;
@@ -197,6 +203,8 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
       globalSummary.absent += empSummary.absent;
       globalSummary.halfDay += empSummary.halfDay;
       globalSummary.onLeave += empSummary.onLeave;
+      globalSummary.paidLeave += empSummary.paidLeave;
+      globalSummary.lwp += empSummary.lwp;
       globalSummary.late += empSummary.late;
       globalSummary.totalWorkingMinutes += empSummary.totalWorkingMinutes;
       globalSummary.totalExpectedDays += empSummary.totalExpectedDays;
@@ -272,7 +280,7 @@ async function exportExcel(res: Response, summary: any, employeeReports: any[], 
     const logoPath = path.join(process.cwd(), '../mobile/assets/logo.png');
     if (fs.existsSync(logoPath)) {
       const logoId = workbook.addImage({
-        buffer: fs.readFileSync(logoPath),
+        buffer: fs.readFileSync(logoPath) as any,
         extension: 'png'
       });
       sheet.addImage(logoId, {
@@ -294,9 +302,11 @@ async function exportExcel(res: Response, summary: any, employeeReports: any[], 
   sheet.getCell('A6').value = 'Present days'; sheet.getCell('B6').value = summary.present;
   sheet.getCell('A7').value = 'Absent days'; sheet.getCell('B7').value = summary.absent;
   sheet.getCell('A8').value = 'Leave days'; sheet.getCell('B8').value = summary.onLeave;
-  sheet.getCell('A9').value = 'Late arrivals'; sheet.getCell('B9').value = summary.late;
-  sheet.getCell('A10').value = 'Total working hours'; sheet.getCell('B10').value = formatMins(summary.totalWorkingMinutes);
-  sheet.getCell('A11').value = 'Overtime'; sheet.getCell('B11').value = '0h 0m';
+  sheet.getCell('A9').value = 'Paid Leave'; sheet.getCell('B9').value = summary.paidLeave;
+  sheet.getCell('A10').value = 'Leave Without Pay'; sheet.getCell('B10').value = summary.lwp;
+  sheet.getCell('A11').value = 'Late arrivals'; sheet.getCell('B11').value = summary.late;
+  sheet.getCell('A12').value = 'Total working hours'; sheet.getCell('B12').value = formatMins(summary.totalWorkingMinutes);
+  sheet.getCell('A13').value = 'Overtime'; sheet.getCell('B13').value = '0h 0m';
 
   sheet.addRow([]);
   sheet.addRow([]);
@@ -357,18 +367,18 @@ async function exportPdf(res: Response, summary: any, employeeReports: any[], fr
   // Simple table rendering
   const drawRow = (y: number, cols: string[]) => {
     let x = 30;
-    const w = [150, 50, 50, 60, 50, 50, 80, 50]; // widths
+    const w = [130, 40, 40, 40, 40, 50, 40, 40, 60, 40]; // widths
     let maxHeight = 0;
     cols.forEach((txt, i) => {
       const height = doc.heightOfString(txt, { width: w[i] });
       if (height > maxHeight) maxHeight = height;
       doc.text(txt, x, y, { width: w[i], align: 'left' });
-      x += w[i] + 10;
+      x += w[i] + 5;
     });
     return maxHeight;
   };
 
-  const headerHeight = drawRow(doc.y, ['Employee', 'Present', 'Absent', 'Half Day', 'Leave', 'Late', 'Hours', '%']);
+  const headerHeight = drawRow(doc.y, ['Employee', 'Present', 'Absent', 'Half Day', 'Leave', 'Paid Leave', 'LWP', 'Late', 'Hours', '%']);
   doc.y += headerHeight + 5;
   doc.moveTo(30, doc.y).lineTo(800, doc.y).stroke();
   doc.y += 10;
@@ -384,6 +394,8 @@ async function exportPdf(res: Response, summary: any, employeeReports: any[], fr
       String(er.summary.absent),
       String(er.summary.halfDay),
       String(er.summary.onLeave),
+      String(er.summary.paidLeave),
+      String(er.summary.lwp),
       String(er.summary.late),
       formatMins(er.summary.totalWorkingMinutes),
       `${er.summary.attendancePercentage}%`

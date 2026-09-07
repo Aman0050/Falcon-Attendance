@@ -26,7 +26,7 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
 export const markAsRead = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const employeeId = req.user!.id;
-    const notificationId = parseInt(req.params.id);
+    const notificationId = parseInt(req.params.id as string);
 
     const updateRes = await query(`
       UPDATE notifications 

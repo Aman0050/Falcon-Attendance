@@ -8,6 +8,8 @@ import AdminAttendance from './pages/AdminAttendance';
 import AdminEmployees from './pages/AdminEmployees';
 import AdminSettings from './pages/AdminSettings';
 import AdminReports from './pages/AdminReports';
+import AdminLeave from './pages/AdminLeave';
+import LeaveInitialization from './pages/LeaveInitialization';
 
 function Navigation() {
   const { user, logout } = useAuth();
@@ -33,6 +35,7 @@ function Navigation() {
             <Nav.Link as={Link} to="/" active={location.pathname === '/'}>Dashboard</Nav.Link>
             <Nav.Link as={Link} to="/employees" active={location.pathname === '/employees'}>Employees</Nav.Link>
             <Nav.Link as={Link} to="/attendance" active={location.pathname === '/attendance'}>Attendance</Nav.Link>
+            <Nav.Link as={Link} to="/leave" active={location.pathname === '/leave'}>Leave</Nav.Link>
             <Nav.Link as={Link} to="/reports" active={location.pathname === '/reports'}>Reports</Nav.Link>
             <Nav.Link as={Link} to="/settings" active={location.pathname === '/settings'}>Settings</Nav.Link>
           </Nav>
@@ -68,6 +71,8 @@ function App() {
             <Route path="/employees" element={<><Navigation /><AdminEmployees /></>} />
             <Route path="/attendance" element={<><Navigation /><AdminAttendance /></>} />
             <Route path="/reports" element={<><Navigation /><AdminReports /></>} />
+            <Route path="/leave" element={<><Navigation /><AdminLeave /></>} />
+            <Route path="/leave-init" element={<><Navigation /><LeaveInitialization /></>} />
             <Route path="/settings" element={<><Navigation /><AdminSettings /></>} />
           </Route>
           

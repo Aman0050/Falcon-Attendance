@@ -4,10 +4,12 @@ import { Platform } from 'react-native';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000');
 
 export interface LeaveBalance {
-  leaveType: string;
-  allocatedDays: number;
-  usedDays: number;
-  remainingDays: number;
+  accruedLeave: number;
+  usedPaidLeave: number;
+  leaveWithoutPay: number;
+  currentBalance: number;
+  lastCreditDate: string | null;
+  eligible: boolean;
 }
 
 export interface LeaveRequest {
@@ -31,7 +33,7 @@ export const getLeaveBalances = async (token: string) => {
   }
 };
 
-export const applyLeave = async (token: string, data: { leaveTypeId: number, startDate: string, endDate: string, reason: string }) => {
+export const applyLeave = async (token: string, data: { startDate: string, endDate: string, reason: string }) => {
   try {
     const res = await axios.post(`${API_URL}/api/leave`, data, {
       headers: { Authorization: `Bearer ${token}` }

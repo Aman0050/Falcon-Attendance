@@ -10,7 +10,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.falconinfo.attendance",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Falcon Attendance requires your location to verify you are inside the office premises during check-in and check-out."
+        "NSLocationWhenInUseUsageDescription": "Falcon Attendance requires your location to verify you are inside the office premises during check-in and check-out.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

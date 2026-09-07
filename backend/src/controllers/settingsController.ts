@@ -97,7 +97,7 @@ export const addHoliday = async (req: AuthRequest, res: Response): Promise<void>
 
 export const deleteHoliday = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     await query('DELETE FROM holidays WHERE id = $1', [id]);
     res.json({ success: true, message: 'Holiday deleted' });
   } catch (error) {

@@ -4,7 +4,6 @@ import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
 
 const applyLeaveSchema = z.object({
-  leaveTypeId: z.number().positive(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
   reason: z.string().min(3).max(500),
@@ -13,37 +12,41 @@ const applyLeaveSchema = z.object({
 export const getBalances = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const employeeId = req.user!.id;
-    // Current business year based on IST
     const year = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
 
     const balanceRes = await query(`
-      SELECT lt.code as "leaveType", lb.allocated_days as "allocatedDays", lb.used_days as "usedDays"
-      FROM leave_balances lb
-      JOIN leave_types lt ON lb.leave_type_id = lt.id
-      WHERE lb.employee_id = $1 AND lb.year = $2
+      SELECT accrued_leave, used_paid_leave, leave_without_pay, current_balance, last_credit_date
+      FROM leave_balances
+      WHERE employee_id = $1 AND year = $2
     `, [employeeId, year]);
 
-    // If no balances are set up, we should still return the types with 0 balance
     if (balanceRes.rows.length === 0) {
-      const typesRes = await query(`SELECT code FROM leave_types WHERE is_active = true`);
-      const emptyBalances = typesRes.rows.map(t => ({
-        leaveType: t.code,
-        allocatedDays: 0,
-        usedDays: 0,
-        remainingDays: 0
-      }));
-      res.json({ success: true, data: emptyBalances });
+      res.json({
+        success: true,
+        data: {
+          accruedLeave: 0,
+          usedPaidLeave: 0,
+          leaveWithoutPay: 0,
+          currentBalance: 0,
+          lastCreditDate: null,
+          eligible: false
+        }
+      });
       return;
     }
 
-    const data = balanceRes.rows.map(r => ({
-      leaveType: r.leaveType,
-      allocatedDays: r.allocatedDays,
-      usedDays: r.usedDays,
-      remainingDays: r.allocatedDays - r.usedDays
-    }));
-
-    res.json({ success: true, data });
+    const b = balanceRes.rows[0];
+    res.json({
+      success: true,
+      data: {
+        accruedLeave: parseFloat(b.accrued_leave),
+        usedPaidLeave: parseFloat(b.used_paid_leave),
+        leaveWithoutPay: parseFloat(b.leave_without_pay),
+        currentBalance: parseFloat(b.current_balance),
+        lastCreditDate: b.last_credit_date,
+        eligible: true
+      }
+    });
   } catch (error) {
     console.error('getBalances error:', error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch leave balances' } });
@@ -51,6 +54,8 @@ export const getBalances = async (req: AuthRequest, res: Response): Promise<void
 };
 
 export const applyLeave = async (req: AuthRequest, res: Response): Promise<void> => {
+  const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+  
   try {
     const employeeId = req.user!.id;
     const parsed = applyLeaveSchema.safeParse(req.body);
@@ -60,9 +65,8 @@ export const applyLeave = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const { leaveTypeId, startDate, endDate, reason } = parsed.data;
+    const { startDate, endDate, reason } = parsed.data;
 
-    // Validate dates
     const start = new Date(startDate);
     const end = new Date(endDate);
     if (start > end) {
@@ -70,23 +74,14 @@ export const applyLeave = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    // Calculate total days (inclusive)
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
-    // Check leave type exists and is active
-    const ltRes = await query(`SELECT id FROM leave_types WHERE id = $1 AND is_active = true`, [leaveTypeId]);
-    if (ltRes.rows.length === 0) {
-      res.status(400).json({ success: false, error: { code: 'LEAVE_TYPE_INACTIVE', message: 'Selected leave type is inactive or not found' } });
-      return;
-    }
-
-    // Check overlapping leave
-    const overlapRes = await query(`
+    const overlapRes = await client.query(`
       SELECT id FROM leave_requests
       WHERE employee_id = $1 
       AND status IN ('PENDING', 'APPROVED')
-      AND start_date <= $2 AND end_date >= $3
+      AND from_date <= $2 AND to_date >= $3
     `, [employeeId, endDate, startDate]);
     
     if (overlapRes.rows.length > 0) {
@@ -94,27 +89,81 @@ export const applyLeave = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    // Check balance
     const year = startDate.substring(0, 4);
-    const balanceRes = await query(`
-      SELECT allocated_days, used_days FROM leave_balances 
-      WHERE employee_id = $1 AND leave_type_id = $2 AND year = $3
-    `, [employeeId, leaveTypeId, year]);
+    
+    await client.query('BEGIN');
+    
+    const balanceRes = await client.query(`
+      SELECT current_balance FROM leave_balances 
+      WHERE employee_id = $1 AND year = $2 FOR UPDATE
+    `, [employeeId, year]);
 
-    if (balanceRes.rows.length === 0 || (balanceRes.rows[0].allocated_days - balanceRes.rows[0].used_days) < totalDays) {
-      res.status(400).json({ success: false, error: { code: 'INSUFFICIENT_LEAVE_BALANCE', message: 'Insufficient leave balance.' } });
-      return;
+    let availableBalance = 0;
+    if (balanceRes.rows.length > 0) {
+      availableBalance = parseFloat(balanceRes.rows[0].current_balance);
     }
 
-    // Create request
-    const insertRes = await query(`
-      INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, total_days, reason, status)
-      VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
-      RETURNING id
-    `, [employeeId, leaveTypeId, startDate, endDate, totalDays, reason]);
+    const insertedIds = [];
 
-    res.json({ success: true, data: { leaveId: insertRes.rows[0].id, status: 'PENDING' } });
+    if (availableBalance >= totalDays) {
+      // All paid leave
+      const insertRes = await client.query(`
+        INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+        VALUES ($1, $2, $3, $4, $5, 'Paid Leave', 'PENDING')
+        RETURNING id
+      `, [employeeId, startDate, endDate, totalDays, reason]);
+      insertedIds.push(insertRes.rows[0].id);
+    } else {
+      // Split into Paid Leave and Leave Without Pay
+      let remainingDays = totalDays;
+      let currentStartDate = new Date(start);
+
+      if (availableBalance > 0) {
+        const paidLeaveDays = availableBalance;
+        const paidEndDate = new Date(currentStartDate);
+        paidEndDate.setDate(paidEndDate.getDate() + paidLeaveDays - 1);
+
+        const insertRes1 = await client.query(`
+          INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+          VALUES ($1, $2, $3, $4, $5, 'Paid Leave', 'PENDING')
+          RETURNING id
+        `, [
+          employeeId, 
+          currentStartDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), 
+          paidEndDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), 
+          paidLeaveDays, 
+          reason
+        ]);
+        insertedIds.push(insertRes1.rows[0].id);
+
+        remainingDays -= paidLeaveDays;
+        currentStartDate = new Date(paidEndDate);
+        currentStartDate.setDate(currentStartDate.getDate() + 1);
+      }
+
+      if (remainingDays > 0) {
+        const insertRes2 = await client.query(`
+          INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+          VALUES ($1, $2, $3, $4, $5, 'Leave Without Pay', 'PENDING')
+          RETURNING id
+        `, [
+          employeeId, 
+          currentStartDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), 
+          endDate, 
+          remainingDays, 
+          reason
+        ]);
+        insertedIds.push(insertRes2.rows[0].id);
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, data: { leaveIds: insertedIds, status: 'PENDING' } });
   } catch (error) {
+    const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+    await client.query('ROLLBACK');
+    client.release();
+    
     console.error('applyLeave error:', error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to apply for leave' } });
   }
@@ -144,9 +193,8 @@ export const getLeaveHistory = async (req: AuthRequest, res: Response): Promise<
     const total = parseInt(countRes.rows[0].count);
 
     const histRes = await query(`
-      SELECT lr.id, lt.code as "leaveType", lr.start_date, lr.end_date, lr.total_days, lr.reason, lr.status
+      SELECT lr.id, lr.leave_type as "leaveType", lr.from_date, lr.to_date, lr.days as total_days, lr.reason, lr.status
       FROM leave_requests lr
-      JOIN leave_types lt ON lr.leave_type_id = lt.id
       ${filterQuery}
       ORDER BY lr.created_at DESC
       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
@@ -158,9 +206,9 @@ export const getLeaveHistory = async (req: AuthRequest, res: Response): Promise<
         items: histRes.rows.map(rec => ({
           id: rec.id,
           leaveType: rec.leaveType,
-          startDate: new Date(rec.start_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-          endDate: new Date(rec.end_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-          totalDays: rec.total_days,
+          startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+          endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+          totalDays: parseFloat(rec.total_days),
           reason: rec.reason,
           status: rec.status
         })),
@@ -176,13 +224,12 @@ export const getLeaveHistory = async (req: AuthRequest, res: Response): Promise<
 export const getLeaveRequest = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const employeeId = req.user!.id;
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
 
     const leaveRes = await query(`
-      SELECT lr.id, lt.code as "leaveType", lr.start_date, lr.end_date, lr.total_days, lr.reason, lr.status,
-             lr.admin_comment, lr.reviewed_at, lr.created_at
+      SELECT lr.id, lr.leave_type as "leaveType", lr.from_date, lr.to_date, lr.days as total_days, lr.reason, lr.status,
+             lr.remarks as admin_comment, lr.approved_at as reviewed_at, lr.created_at
       FROM leave_requests lr
-      JOIN leave_types lt ON lr.leave_type_id = lt.id
       WHERE lr.id = $1 AND lr.employee_id = $2
     `, [id, employeeId]);
 
@@ -197,9 +244,9 @@ export const getLeaveRequest = async (req: AuthRequest, res: Response): Promise<
       data: {
         id: rec.id,
         leaveType: rec.leaveType,
-        startDate: new Date(rec.start_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-        endDate: new Date(rec.end_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-        totalDays: rec.total_days,
+        startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+        endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+        totalDays: parseFloat(rec.total_days),
         reason: rec.reason,
         status: rec.status,
         adminComment: rec.admin_comment,
@@ -216,7 +263,7 @@ export const getLeaveRequest = async (req: AuthRequest, res: Response): Promise<
 export const cancelLeave = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const employeeId = req.user!.id;
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
 
     const existRes = await query(`SELECT status FROM leave_requests WHERE id = $1 AND employee_id = $2`, [id, employeeId]);
     if (existRes.rows.length === 0) {

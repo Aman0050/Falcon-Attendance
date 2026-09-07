@@ -3,6 +3,65 @@ import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
 import { z } from 'zod';
 
+export const isInitialized = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const resCount = await query(`SELECT COUNT(*) as count FROM leave_balances`);
+    const initialized = parseInt(resCount.rows[0].count) > 0;
+    res.json({ success: true, data: { initialized } });
+  } catch (error) {
+    console.error('isInitialized error:', error);
+    res.status(500).json({ success: false, error: { message: 'Error checking initialization status' } });
+  }
+};
+
+const initializeSchema = z.object({
+  quarter: z.number().min(1).max(4),
+  employees: z.array(z.object({
+    employeeId: z.number(),
+    usedPaidLeave: z.number().min(0)
+  }))
+});
+
+export const initializeLeaves = async (req: AuthRequest, res: Response): Promise<void> => {
+  const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+  try {
+    const parsed = initializeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: { message: 'Invalid data provided' } });
+      return;
+    }
+
+    const { quarter, employees } = parsed.data;
+    const year = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
+
+    const check = await client.query(`SELECT COUNT(*) FROM leave_balances`);
+    if (parseInt(check.rows[0].count) > 0) {
+      res.status(400).json({ success: false, error: { message: 'Leave balances already initialized' } });
+      return;
+    }
+
+    await client.query('BEGIN');
+
+    for (const emp of employees) {
+      const accrued = quarter * 4.5;
+      const currentBalance = accrued - emp.usedPaidLeave;
+      await client.query(`
+        INSERT INTO leave_balances (employee_id, year, accrued_leave, used_paid_leave, current_balance, last_credit_date)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+      `, [emp.employeeId, year, accrued, emp.usedPaidLeave, currentBalance]);
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Leave initialized successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('initializeLeaves error:', error);
+    res.status(500).json({ success: false, error: { message: 'Initialization failed' } });
+  } finally {
+    client.release();
+  }
+};
+
 export const getAdminLeaves = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -40,11 +99,10 @@ export const getAdminLeaves = async (req: AuthRequest, res: Response): Promise<v
     const total = parseInt(countRes.rows[0].count);
 
     const histRes = await query(`
-      SELECT lr.id, u.name as employee_name, u.employee_id as employee_code, lt.code as "leaveType",
-             lr.start_date, lr.end_date, lr.total_days, lr.reason, lr.status, lr.created_at
+      SELECT lr.id, u.name as employee_name, u.employee_id as employee_code, lr.leave_type as "leaveType",
+             lr.from_date, lr.to_date, lr.days, lr.reason, lr.status, lr.created_at
       FROM leave_requests lr
       JOIN users u ON lr.employee_id = u.id
-      JOIN leave_types lt ON lr.leave_type_id = lt.id
       ${filterQuery}
       ORDER BY lr.created_at DESC
       LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
@@ -58,9 +116,9 @@ export const getAdminLeaves = async (req: AuthRequest, res: Response): Promise<v
           employeeName: rec.employee_name,
           employeeId: rec.employee_code,
           leaveType: rec.leaveType,
-          startDate: new Date(rec.start_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-          endDate: new Date(rec.end_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-          totalDays: rec.total_days,
+          startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+          endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+          totalDays: parseFloat(rec.days),
           reason: rec.reason,
           status: rec.status,
           createdAt: rec.created_at
@@ -79,12 +137,12 @@ export const approveLeave = async (req: AuthRequest, res: Response): Promise<voi
   
   try {
     const adminId = req.user!.id;
-    const leaveId = parseInt(req.params.id);
+    const leaveId = parseInt(req.params.id as string);
 
     await client.query('BEGIN');
 
     const lrRes = await client.query(`
-      SELECT employee_id, leave_type_id, start_date, total_days, status
+      SELECT employee_id, leave_type, from_date, days, status
       FROM leave_requests 
       WHERE id = $1 FOR UPDATE
     `, [leaveId]);
@@ -102,32 +160,53 @@ export const approveLeave = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    // Check balance
-    const year = new Date(lr.start_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
-    const balRes = await client.query(`
-      SELECT id, allocated_days, used_days FROM leave_balances 
-      WHERE employee_id = $1 AND leave_type_id = $2 AND year = $3 FOR UPDATE
-    `, [lr.employee_id, lr.leave_type_id, year]);
+    if (lr.leave_type === 'Paid Leave') {
+      const year = new Date(lr.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
+      const balRes = await client.query(`
+        SELECT id, current_balance FROM leave_balances 
+        WHERE employee_id = $1 AND year = $2 FOR UPDATE
+      `, [lr.employee_id, year]);
 
-    if (balRes.rows.length === 0 || (balRes.rows[0].allocated_days - balRes.rows[0].used_days) < lr.total_days) {
-      await client.query('ROLLBACK');
-      res.status(400).json({ success: false, error: { code: 'INSUFFICIENT_LEAVE_BALANCE', message: 'Insufficient balance' } });
-      return;
+      if (balRes.rows.length === 0 || parseFloat(balRes.rows[0].current_balance) < parseFloat(lr.days)) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, error: { code: 'INSUFFICIENT_LEAVE_BALANCE', message: 'Insufficient balance' } });
+        return;
+      }
+
+      await client.query(`
+        UPDATE leave_balances 
+        SET used_paid_leave = used_paid_leave + $1, current_balance = current_balance - $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [lr.days, balRes.rows[0].id]);
+    } else if (lr.leave_type === 'Leave Without Pay') {
+      const year = new Date(lr.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
+      
+      // Upsert logic for leave without pay if balance row doesn't exist?
+      // Since it's Leave Without Pay, they might not have a balance row (ineligible yet).
+      const balRes = await client.query(`
+        SELECT id FROM leave_balances WHERE employee_id = $1 AND year = $2 FOR UPDATE
+      `, [lr.employee_id, year]);
+
+      if (balRes.rows.length > 0) {
+        await client.query(`
+          UPDATE leave_balances 
+          SET leave_without_pay = leave_without_pay + $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [lr.days, balRes.rows[0].id]);
+      } else {
+        await client.query(`
+          INSERT INTO leave_balances (employee_id, year, leave_without_pay)
+          VALUES ($1, $2, $3)
+        `, [lr.employee_id, year, lr.days]);
+      }
     }
 
     // Update Request
     await client.query(`
       UPDATE leave_requests 
-      SET status = 'APPROVED', reviewed_by = $1, reviewed_at = CURRENT_TIMESTAMP
+      SET status = 'APPROVED', approved_by = $1, approved_at = CURRENT_TIMESTAMP
       WHERE id = $2
     `, [adminId, leaveId]);
-
-    // Deduct Balance
-    await client.query(`
-      UPDATE leave_balances 
-      SET used_days = used_days + $1, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $2
-    `, [lr.total_days, balRes.rows[0].id]);
 
     await client.query('COMMIT');
     res.json({ success: true, message: 'Leave approved' });
@@ -145,7 +224,7 @@ const rejectSchema = z.object({ comment: z.string().min(3).max(500) });
 export const rejectLeave = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const adminId = req.user!.id;
-    const leaveId = parseInt(req.params.id);
+    const leaveId = parseInt(req.params.id as string);
     const parsed = rejectSchema.safeParse(req.body);
     
     if (!parsed.success) {
@@ -166,7 +245,7 @@ export const rejectLeave = async (req: AuthRequest, res: Response): Promise<void
 
     await query(`
       UPDATE leave_requests 
-      SET status = 'REJECTED', admin_comment = $1, reviewed_by = $2, reviewed_at = CURRENT_TIMESTAMP
+      SET status = 'REJECTED', remarks = $1, approved_by = $2, approved_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `, [parsed.data.comment, adminId, leaveId]);
 

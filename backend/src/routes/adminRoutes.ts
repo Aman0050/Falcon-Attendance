@@ -37,6 +37,12 @@ router.get('/reports/attendance', getAttendanceReport);
 router.get('/attendance', getAttendance);
 router.get('/attendance/summary', getDailySummary);
 
+router.get('/leave/is-initialized', (req, res, next) => {
+  import('../controllers/adminLeaveController').then(m => m.isInitialized(req, res)).catch(next);
+});
+router.post('/leave/initialize', (req, res, next) => {
+  import('../controllers/adminLeaveController').then(m => m.initializeLeaves(req, res)).catch(next);
+});
 router.get('/leave', getAdminLeaves);
 router.patch('/leave/:id/approve', approveLeave);
 router.patch('/leave/:id/reject', rejectLeave);

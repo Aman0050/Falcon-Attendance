@@ -3,7 +3,74 @@ import { query } from '../db';
 import { getAttendanceSettings } from './attendanceStatusService';
 
 export function startScheduler() {
-  // Run every 15 minutes
+  // Quarterly Credit Engine - Runs every day at 00:01
+  cron.schedule('1 0 * * *', async () => {
+    try {
+      const now = new Date();
+      const month = now.getMonth() + 1;
+      const day = now.getDate();
+
+      // Only run on Jan 1, Apr 1, Jul 1, Oct 1
+      if (day === 1 && [1, 4, 7, 10].includes(month)) {
+        const year = now.getFullYear();
+        const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+        
+        try {
+          await client.query('BEGIN');
+          
+          // Get policy
+          const policyRes = await client.query(`SELECT * FROM leave_policy LIMIT 1`);
+          const creditDays = policyRes.rows.length > 0 ? parseFloat(policyRes.rows[0].quarterly_leave) : 4.5;
+          const probMonths = policyRes.rows.length > 0 ? parseInt(policyRes.rows[0].probation_months) : 6;
+
+          // Find eligible active employees
+          const employeesRes = await client.query(`SELECT id, joining_date FROM users WHERE status = 'active' AND joining_date IS NOT NULL`);
+          
+          for (const emp of employeesRes.rows) {
+            const joinDate = new Date(emp.joining_date);
+            const probDate = new Date(joinDate);
+            probDate.setMonth(probDate.getMonth() + probMonths);
+
+            if (now >= probDate) {
+              const balRes = await client.query(`SELECT id, last_credit_date FROM leave_balances WHERE employee_id = $1 AND year = $2`, [emp.id, year]);
+              
+              if (balRes.rows.length === 0) {
+                await client.query(`
+                  INSERT INTO leave_balances (employee_id, year, accrued_leave, current_balance, last_credit_date)
+                  VALUES ($1, $2, $3, $4, CURRENT_DATE)
+                `, [emp.id, year, creditDays, creditDays]);
+              } else {
+                const b = balRes.rows[0];
+                const lastCredit = b.last_credit_date ? new Date(b.last_credit_date) : null;
+                
+                // Only credit if we haven't credited today
+                if (!lastCredit || lastCredit.toDateString() !== now.toDateString()) {
+                  await client.query(`
+                    UPDATE leave_balances
+                    SET accrued_leave = accrued_leave + $1,
+                        current_balance = current_balance + $1,
+                        last_credit_date = CURRENT_DATE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = $2
+                  `, [creditDays, b.id]);
+                }
+              }
+            }
+          }
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK');
+          console.error('Quarterly credit error:', err);
+        } finally {
+          client.release();
+        }
+      }
+    } catch (e) {
+      console.error('Quarterly credit schedule error:', e);
+    }
+  });
+
+  // Daily Attendance Processing - Runs every 15 minutes
   cron.schedule('*/15 * * * *', async () => {
     try {
       const now = new Date();
@@ -26,7 +93,7 @@ export function startScheduler() {
       // 1. ABSENCE PROCESSING
       // If current time >= absence_cutoff
       if (timeStr >= settings.absence_cutoff) {
-        // Find active employees with no check-in today and no full-day approved leave
+        // Find active employees with no check-in today
         const absentRes = await query(`
           SELECT u.id, u.role
           FROM users u
@@ -34,28 +101,53 @@ export function startScheduler() {
           AND NOT EXISTS (
             SELECT 1 FROM attendance a WHERE a.employee_id = u.id AND a.attendance_date = $1
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM leave_requests lr 
-            WHERE lr.employee_id = u.id 
-              AND lr.status = 'APPROVED' 
-              AND lr.start_date <= $1 
-              AND lr.end_date >= $1
-              AND lr.leave_duration = 'FULL_DAY'
-          )
         `, [dateStr]);
 
-        const absentEmployees = absentRes.rows.filter(u => u.role !== 'admin'); // Assuming admins don't get marked absent for this requirement, though requirement doesn't strictly say so, but it's standard. Wait, the requirement says "Calculate active employees". Let's just use all in absentRes.
         const absentCount = absentRes.rows.length;
 
         for (const user of absentRes.rows) {
-          // Insert notification (deduplicated by unique constraint)
+          // Check for approved leave
+          const leaveRes = await query(`
+            SELECT leave_type 
+            FROM leave_requests 
+            WHERE employee_id = $1 
+              AND status = 'APPROVED' 
+              AND from_date <= $2 
+              AND to_date >= $2
+          `, [user.id, dateStr]);
+
+          let attendanceStatus = 'Absent';
+          
+          if (leaveRes.rows.length > 0) {
+            attendanceStatus = leaveRes.rows[0].leave_type === 'Paid Leave' ? 'Paid Leave' : 'Leave Without Pay';
+          }
+
+          if (attendanceStatus === 'Absent') {
+            try {
+              await query(`
+                INSERT INTO notifications (employee_id, type, attendance_date, message)
+                VALUES ($1, 'ABSENCE', $2, 'Attendance not marked today. You have been marked absent.')
+              `, [user.id, dateStr]);
+            } catch (e: any) {
+              if (e.code !== '23505') console.error('Failed to insert absence notification:', e);
+            }
+          }
+          
+          // Wait, we need to insert an attendance record for 'Absent', 'Paid Leave', 'Leave Without Pay' 
+          // because if they are absent, there is NO record. To make reports show "Present, Absent, Paid Leave...",
+          // the attendance table should have a record with status = attendanceStatus.
+          // Let's insert/update attendance record.
+          
           try {
-            await query(`
-              INSERT INTO notifications (employee_id, type, attendance_date, message)
-              VALUES ($1, 'ABSENCE', $2, 'Attendance not marked today. You have been marked absent.')
-            `, [user.id, dateStr]);
-          } catch (e: any) {
-            if (e.code !== '23505') console.error('Failed to insert absence notification:', e);
+            const attCheck = await query(`SELECT id FROM attendance WHERE employee_id = $1 AND attendance_date = $2`, [user.id, dateStr]);
+            if (attCheck.rows.length === 0) {
+              await query(`
+                INSERT INTO attendance (employee_id, office_id, attendance_date, check_in, status)
+                VALUES ($1, (SELECT id FROM offices LIMIT 1), $2, CURRENT_TIMESTAMP, $3)
+              `, [user.id, dateStr, attendanceStatus]); // Fake check_in timestamp to satisfy NOT NULL constraint
+            }
+          } catch (e) {
+            console.error('Failed to insert absence attendance record:', e);
           }
         }
 
@@ -67,7 +159,7 @@ export function startScheduler() {
               await query(`
                 INSERT INTO notifications (employee_id, type, attendance_date, message)
                 VALUES ($1, 'ADMIN_DAILY_ABSENCE', $2, $3)
-              `, [admin.id, dateStr, `${absentCount} employees are absent today.`]);
+              `, [admin.id, dateStr, `${absentCount} employees have not marked attendance.`]);
             } catch (e: any) {
               if (e.code !== '23505') console.error('Failed to insert admin absence notification:', e);
             }

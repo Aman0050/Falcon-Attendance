@@ -86,7 +86,7 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
 
 export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     const userRes = await query(`
       SELECT id, employee_id as "employeeId", name, email, phone, department, 
              designation, joining_date as "joiningDate", status, role, profile_photo_url as "profilePhotoUrl"
@@ -127,10 +127,9 @@ export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promis
 
     // Leave balances
     const balRes = await query(`
-      SELECT lt.name as "leaveType", lb.allocated_days as "allocatedDays", lb.used_days as "usedDays"
-      FROM leave_balances lb
-      JOIN leave_types lt ON lb.leave_type_id = lt.id
-      WHERE lb.employee_id = $1 AND lb.year = $2
+      SELECT accrued_leave as "accruedLeave", used_paid_leave as "usedPaidLeave", leave_without_pay as "leaveWithoutPay", current_balance as "currentBalance", last_credit_date as "lastCreditDate"
+      FROM leave_balances
+      WHERE employee_id = $1 AND year = $2
     `, [id, year]);
 
     res.json({
@@ -147,12 +146,13 @@ export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promis
           pending: parseInt(leaveRes.rows[0].pending || '0'),
           rejected: parseInt(leaveRes.rows[0].rejected || '0'),
         },
-        leaveBalances: balRes.rows.map(r => ({
-          leaveType: r.leaveType,
-          allocatedDays: r.allocatedDays,
-          usedDays: r.usedDays,
-          remainingDays: r.allocatedDays - r.usedDays
-        }))
+        leaveBalances: balRes.rows.length > 0 ? {
+          accruedLeave: parseFloat(balRes.rows[0].accruedLeave),
+          usedPaidLeave: parseFloat(balRes.rows[0].usedPaidLeave),
+          leaveWithoutPay: parseFloat(balRes.rows[0].leaveWithoutPay),
+          currentBalance: parseFloat(balRes.rows[0].currentBalance),
+          lastCreditDate: balRes.rows[0].lastCreditDate
+        } : null
       }
     });
   } catch (error) {
@@ -223,7 +223,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
 
 export const editEmployee = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     const parsed = editEmployeeSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
@@ -269,7 +269,7 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
 
 export const updateEmployeeStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     const status = req.body.status;
     if (status !== 'active' && status !== 'inactive') {
       res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Status must be active or inactive' } });
@@ -292,7 +292,7 @@ export const updateEmployeeStatus = async (req: AuthRequest, res: Response): Pro
 
 export const resetPassword = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     
     // Check if user exists
     const userRes = await query(`SELECT id FROM users WHERE id = $1`, [id]);
@@ -315,7 +315,7 @@ export const resetPassword = async (req: AuthRequest, res: Response): Promise<vo
 
 export const deleteEmployee = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id as string);
     if (id === req.user!.id) {
       res.status(400).json({ success: false, error: { code: 'INVALID_ACTION', message: 'Cannot delete yourself' } });
       return;
