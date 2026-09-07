@@ -122,7 +122,7 @@ export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promis
         SUM(CASE WHEN status = 'PENDING' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) as rejected
       FROM leave_requests
-      WHERE employee_id = $1 AND EXTRACT(YEAR FROM start_date) = $2
+      WHERE employee_id = $1 AND EXTRACT(YEAR FROM from_date) = $2
     `, [id, year]);
 
     // Leave balances

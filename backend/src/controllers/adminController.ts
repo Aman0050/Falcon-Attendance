@@ -49,7 +49,7 @@ export const getAttendance = async (req: AuthRequest, res: Response): Promise<vo
       WITH expanded_leaves AS (
         SELECT d::date as attendance_date, lr.employee_id
         FROM leave_requests lr
-        JOIN generate_series(lr.start_date, lr.end_date, '1 day'::interval) d ON true
+        JOIN generate_series(lr.from_date, lr.to_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
       ),
       combined AS (
@@ -85,7 +85,7 @@ export const getAttendance = async (req: AuthRequest, res: Response): Promise<vo
       WITH expanded_leaves AS (
         SELECT d::date as attendance_date, lr.employee_id
         FROM leave_requests lr
-        JOIN generate_series(lr.start_date, lr.end_date, '1 day'::interval) d ON true
+        JOIN generate_series(lr.from_date, lr.to_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
       ),
       combined AS (
@@ -161,7 +161,7 @@ export const getDailySummary = async (req: AuthRequest, res: Response): Promise<
       LEFT JOIN (
         SELECT d::date as attendance_date, 'ON LEAVE'::varchar as status, lr.employee_id
         FROM leave_requests lr
-        JOIN generate_series(lr.start_date, lr.end_date, '1 day'::interval) d ON true
+        JOIN generate_series(lr.from_date, lr.to_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
       ) el ON u.id = el.employee_id AND el.attendance_date = $1
       WHERE u.role != 'admin' AND u.status = 'active'

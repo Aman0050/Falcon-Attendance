@@ -197,10 +197,9 @@ export const getToday = async (req: AuthRequest, res: Response): Promise<void> =
       getAttendanceSettings(),
       query('SELECT name FROM holidays WHERE holiday_date = $1 AND is_active = true', [today]),
       query(`
-        SELECT lt.name as leave_type, lr.status, lr.leave_duration 
+        SELECT lr.leave_type, lr.status, lr.days, lr.from_date as start_date, lr.to_date as end_date
         FROM leave_requests lr
-        JOIN leave_types lt ON lr.leave_type_id = lt.id
-        WHERE lr.employee_id = $1 AND lr.status = 'APPROVED' AND lr.start_date <= $2 AND lr.end_date >= $2
+        WHERE lr.employee_id = $1 AND lr.status = 'APPROVED' AND lr.from_date <= $2 AND lr.to_date >= $2
         LIMIT 1
       `, [employeeId, today])
     ]);
@@ -265,7 +264,7 @@ export const getHistory = async (req: AuthRequest, res: Response): Promise<void>
       query(`SELECT * FROM attendance WHERE employee_id = $1`, [employeeId]),
       getAttendanceSettings(),
       query(`SELECT holiday_date FROM holidays WHERE is_active = true`),
-      query(`SELECT * FROM leave_requests WHERE employee_id = $1 AND status = 'APPROVED'`, [employeeId])
+      query(`SELECT *, from_date as start_date, to_date as end_date FROM leave_requests WHERE employee_id = $1 AND status = 'APPROVED'`, [employeeId])
     ]);
 
     // Build hash maps for O(1) lookup
@@ -382,7 +381,7 @@ export const getSummary = async (req: AuthRequest, res: Response): Promise<void>
         query(`SELECT * FROM attendance WHERE employee_id = $1`, [employeeId]),
         getAttendanceSettings(),
         query(`SELECT holiday_date FROM holidays WHERE is_active = true`),
-        query(`SELECT * FROM leave_requests WHERE employee_id = $1 AND status = 'APPROVED'`, [employeeId])
+        query(`SELECT *, from_date as start_date, to_date as end_date FROM leave_requests WHERE employee_id = $1 AND status = 'APPROVED'`, [employeeId])
       ]);
 
       const attMap = new Map(attRes.rows.map(r => [new Date(r.attendance_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }), r]));
@@ -472,10 +471,9 @@ export const getCalendar = async (req: AuthRequest, res: Response): Promise<void
       getAttendanceSettings(),
       query(`SELECT holiday_date, name FROM holidays WHERE is_active = true`),
       query(`
-        SELECT lr.*, lt.name as leave_type 
-        FROM leave_requests lr 
-        JOIN leave_types lt ON lr.leave_type_id = lt.id 
-        WHERE lr.employee_id = $1 AND lr.status = 'APPROVED'
+        SELECT *, from_date as start_date, to_date as end_date 
+        FROM leave_requests 
+        WHERE employee_id = $1 AND status = 'APPROVED'
       `, [employeeId])
     ]);
 

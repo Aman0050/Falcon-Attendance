@@ -84,7 +84,7 @@ export const getAttendanceReport = async (req: AuthRequest, res: Response): Prom
       query(`SELECT * FROM attendance WHERE attendance_date >= $1 AND attendance_date <= $2`, [startDateStr, actualEndStr]),
       getAttendanceSettings(),
       query(`SELECT holiday_date, name FROM holidays WHERE is_active = true AND holiday_date >= $1 AND holiday_date <= $2`, [startDateStr, actualEndStr]),
-      query(`SELECT * FROM leave_requests WHERE status = 'APPROVED' AND start_date <= $2 AND end_date >= $1`, [startDateStr, actualEndStr])
+      query(`SELECT *, from_date as start_date, to_date as end_date FROM leave_requests WHERE status = 'APPROVED' AND from_date <= $2 AND to_date >= $1`, [startDateStr, actualEndStr])
     ]);
 
     const attMap = new Map();
