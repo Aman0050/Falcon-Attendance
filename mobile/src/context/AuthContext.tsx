@@ -40,7 +40,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             headers: { Authorization: `Bearer ${storedToken}` },
           });
           
-          if (response.data.user.role === 'EMPLOYEE' || response.data.user.role === 'ADMIN') {
+          const role = response.data.user?.role?.toLowerCase();
+          if (role === 'employee' || role === 'admin') {
             setToken(storedToken);
             setUser(response.data.user);
           } else {

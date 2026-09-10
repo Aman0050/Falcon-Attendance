@@ -44,20 +44,36 @@ const checkIn = async (req, res) => {
         // We enforce timezone at DB or server level. Using CURRENT_DATE in postgres (depends on DB timezone).
         // Let's explicitly use server date for check.
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-        const existRes = await (0, db_1.query)(`SELECT id FROM attendance WHERE employee_id = $1 AND attendance_date = $2`, [employeeId, today]);
-        if (existRes.rows.length > 0) {
+        const existRes = await (0, db_1.query)(`SELECT id, check_in FROM attendance WHERE employee_id = $1 AND attendance_date = $2`, [employeeId, today]);
+        if (existRes.rows.length > 0 && existRes.rows[0].check_in !== null) {
             res.status(400).json({ success: false, error: { code: 'ALREADY_CHECKED_IN', message: 'You have already checked in today.' } });
             return;
         }
-        // 3. Create attendance
-        const insertRes = await (0, db_1.query)(`
-      INSERT INTO attendance (
-        employee_id, office_id, attendance_date, check_in, check_out, check_in_location, status
-      ) VALUES (
-        $1, $2, $3, CURRENT_TIMESTAMP, NULL, ST_SetSRID(ST_MakePoint($4, $5), 4326), 'PRESENT'
-      ) RETURNING id, attendance_date, check_in, status
-    `, [employeeId, locResult.officeId, today, longitude, latitude]);
-        const newRecord = insertRes.rows[0];
+        let newRecord;
+        if (existRes.rows.length > 0) {
+            // Record was auto-created by absence scheduler (check_in is NULL) -> update it!
+            const updateRes = await (0, db_1.query)(`
+        UPDATE attendance 
+        SET office_id = $1, 
+            check_in = CURRENT_TIMESTAMP, 
+            check_in_location = ST_SetSRID(ST_MakePoint($2, $3), 4326),
+            status = 'PRESENT'
+        WHERE id = $4
+        RETURNING id, attendance_date, check_in, status
+      `, [locResult.officeId, longitude, latitude, existRes.rows[0].id]);
+            newRecord = updateRes.rows[0];
+        }
+        else {
+            // 3. Create attendance
+            const insertRes = await (0, db_1.query)(`
+        INSERT INTO attendance (
+          employee_id, office_id, attendance_date, check_in, check_out, check_in_location, status
+        ) VALUES (
+          $1, $2, $3, CURRENT_TIMESTAMP, NULL, ST_SetSRID(ST_MakePoint($4, $5), 4326), 'PRESENT'
+        ) RETURNING id, attendance_date, check_in, status
+      `, [employeeId, locResult.officeId, today, longitude, latitude]);
+            newRecord = insertRes.rows[0];
+        }
         // Trigger Smart Notifications
         try {
             const settings = await (0, attendanceStatusService_1.getAttendanceSettings)();
@@ -143,7 +159,7 @@ const checkOut = async (req, res) => {
         // 2. Find today's attendance
         const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
         const existRes = await (0, db_1.query)(`SELECT id, check_in, check_out FROM attendance WHERE employee_id = $1 AND attendance_date = $2`, [employeeId, today]);
-        if (existRes.rows.length === 0) {
+        if (existRes.rows.length === 0 || !existRes.rows[0].check_in) {
             res.status(400).json({ success: false, error: { code: 'NOT_CHECKED_IN', message: 'You have not checked in today.' } });
             return;
         }
