@@ -8,7 +8,20 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const db_1 = require("../db");
 const attendanceStatusService_1 = require("./attendanceStatusService");
 const notificationService_1 = require("./notificationService");
+const whatsappService_1 = require("./whatsappService");
 function startScheduler() {
+    // 11:00 AM IST - Daily Late Attendance WhatsApp Alerts
+    node_cron_1.default.schedule('0 11 * * *', async () => {
+        try {
+            console.log('[Scheduler] 11:00 AM IST: Checking late attendance and sending WhatsApp alerts...');
+            await (0, whatsappService_1.checkAndSendLateAttendanceAlerts)();
+        }
+        catch (e) {
+            console.error('[Scheduler] 11:00 AM Late Attendance WhatsApp error:', e);
+        }
+    }, {
+        timezone: 'Asia/Kolkata'
+    });
     // Quarterly Credit Engine - Runs every day at 00:01
     node_cron_1.default.schedule('1 0 * * *', async () => {
         try {
@@ -163,6 +176,13 @@ function startScheduler() {
                     catch (e) {
                         console.error('Failed to insert admin absence notification:', e);
                     }
+                }
+                // WhatsApp Late Attendance Alerts (Idempotent: skips if already sent today)
+                try {
+                    await (0, whatsappService_1.checkAndSendLateAttendanceAlerts)(dateStr);
+                }
+                catch (e) {
+                    console.error('[Scheduler] WhatsApp late alert check error:', e);
                 }
             }
             // 2. CHECKOUT MISSING PROCESSING
