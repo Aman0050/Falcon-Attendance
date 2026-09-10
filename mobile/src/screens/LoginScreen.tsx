@@ -1,11 +1,25 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Platform, Image } from 'react-native';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Image,
+  KeyboardAvoidingView,
+  ScrollView,
+} from 'react-native';
 import axios from 'axios';
 import { useAuth } from '../context/AuthContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000');
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL ||
+  (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000');
 
 export default function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
@@ -15,23 +29,27 @@ export default function LoginScreen() {
   const { login } = useAuth();
 
   const handleLogin = async () => {
-    if (!identifier || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!identifier.trim() || !password) {
+      Alert.alert('Incomplete Credentials', 'Please enter both your employee ID/email and password.');
       return;
     }
 
     setLoading(true);
     try {
       const response = await axios.post(`${API_URL}/api/auth/login`, {
-        identifier,
+        identifier: identifier.trim(),
         password,
       });
 
       const { token, user } = response.data;
       await login(token, user);
     } catch (error: any) {
-      const message = error.response?.data?.error || 'Failed to login';
-      Alert.alert('Login Failed', message);
+      const message =
+        error.response?.data?.error?.message ||
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        'Unable to sign in. Please verify your credentials.';
+      Alert.alert('Authentication Failed', message);
     } finally {
       setLoading(false);
     }
@@ -39,50 +57,85 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.formContainer}>
-        <Image 
-          source={require('../../assets/logo.png')} 
-          style={styles.logo} 
-          resizeMode="contain"
-        />
-        <Text style={styles.subtitle}>Sign in to your account</Text>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+          {/* Brand Header */}
+          <View style={styles.brandContainer}>
+            <View style={styles.logoWrap}>
+              <Image source={require('../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+            </View>
+            <Text style={styles.appTitle}>FALCON</Text>
+            <Text style={styles.appSubtitle}>Smart Attendance & Payroll Portal</Text>
+          </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Email or Employee ID"
-          value={identifier}
-          onChangeText={setIdentifier}
-          autoCapitalize="none"
-        />
+          {/* Login Card */}
+          <View style={styles.card}>
+            <Text style={styles.cardHeading}>Sign In</Text>
+            <Text style={styles.cardSubheading}>Enter your credentials to access your workplace</Text>
 
-        <View style={styles.passwordContainer}>
-          <TextInput
-            style={styles.passwordInput}
-            placeholder="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
-          />
-          <TouchableOpacity 
-            style={styles.eyeIcon} 
-            onPress={() => setShowPassword(!showPassword)}
-          >
-            <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={24} color="#666" />
-          </TouchableOpacity>
-        </View>
+            {/* Identifier Input */}
+            <Text style={styles.inputLabel}>Email or Employee ID</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="person-outline" size={18} color="#64748B" style={styles.inputIcon} />
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g. EMP-001 or name@falcon.com"
+                placeholderTextColor="#94A3B8"
+                value={identifier}
+                onChangeText={setIdentifier}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
 
-        <TouchableOpacity 
-          style={[styles.button, loading && styles.buttonDisabled]} 
-          onPress={handleLogin}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Sign In</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+            {/* Password Input */}
+            <Text style={styles.inputLabel}>Password</Text>
+            <View style={styles.inputContainer}>
+              <Ionicons name="lock-closed-outline" size={18} color="#64748B" style={styles.inputIcon} />
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter your password"
+                placeholderTextColor="#94A3B8"
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+              />
+              <TouchableOpacity
+                style={styles.eyeBtn}
+                onPress={() => setShowPassword(!showPassword)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Sign In Button */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              style={[styles.loginBtn, loading && styles.btnDisabled]}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <>
+                  <Text style={styles.loginBtnText}>SIGN IN</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#FFFFFF" style={{ marginLeft: 6 }} />
+                </>
+              )}
+            </TouchableOpacity>
+
+            <View style={styles.securityNote}>
+              <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
+              <Text style={styles.securityText}>Secured with GPS Geofencing & Encryption</Text>
+            </View>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -90,64 +143,137 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F8FAFC',
   },
-  formContainer: {
-    flex: 1,
+  scrollContainer: {
+    flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+  },
+  brandContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  logoWrap: {
+    width: 90,
+    height: 90,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
   },
   logo: {
-    width: 220,
-    height: 220,
-    alignSelf: 'center',
-    marginBottom: 20,
+    width: 68,
+    height: 68,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 30,
+  appTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: 2,
   },
-  input: {
-    backgroundColor: '#f5f5f5',
-    padding: 15,
-    borderRadius: 8,
-    marginBottom: 15,
-    fontSize: 16,
+  appSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 4,
   },
-  passwordContainer: {
+  cardHeading: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  cardSubheading: {
+    fontSize: 13,
+    color: '#64748B',
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  inputLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    marginBottom: 15,
+    backgroundColor: '#F8FAFC',
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    marginBottom: 16,
+    height: 48,
   },
-  passwordInput: {
+  inputIcon: {
+    marginRight: 10,
+  },
+  textInput: {
     flex: 1,
-    padding: 15,
-    fontSize: 16,
+    fontSize: 14,
+    color: '#0F172A',
+    height: '100%',
   },
-  eyeIcon: {
-    padding: 15,
+  eyeBtn: {
+    padding: 4,
   },
-  button: {
-    backgroundColor: '#007bff',
-    padding: 15,
-    borderRadius: 8,
+  loginBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    height: 50,
+    borderRadius: 12,
+    marginTop: 6,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  buttonDisabled: {
-    backgroundColor: '#a0cfff',
+  btnDisabled: {
+    opacity: 0.7,
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  loginBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  securityNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+  },
+  securityText: {
+    marginLeft: 6,
+    fontSize: 11,
+    color: '#15803D',
+    fontWeight: '600',
   },
 });
+

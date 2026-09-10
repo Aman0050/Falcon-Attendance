@@ -1,7 +1,18 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, StatusBar } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Platform,
+  StatusBar,
+  ScrollView,
+  RefreshControl,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { getCurrentLocation } from '../services/locationService';
@@ -9,14 +20,20 @@ import { getTodayAttendance, checkIn, checkOut, AttendanceRecord } from '../api/
 
 export default function HomeScreen() {
   const { user, token, logout } = useAuth();
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
-  
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
 
-  const loadAttendance = async () => {
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+
+  const loadAttendance = async (isRefresh = false) => {
     if (!token) return;
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+
     try {
       const res = await getTodayAttendance(token);
       if (res.success && res.data?.attendance) {
@@ -28,6 +45,7 @@ export default function HomeScreen() {
       console.error(e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -38,98 +56,140 @@ export default function HomeScreen() {
   );
 
   const handleAction = async (action: 'check-in' | 'check-out') => {
-    setLoading(true);
+    setActionLoading(true);
     try {
-      // 1. Get GPS
       const locData = await getCurrentLocation();
-      
-      // 2. Perform Check In/Out
-      const result = action === 'check-in' 
-        ? await checkIn(locData.latitude, locData.longitude, locData.accuracy, token!)
-        : await checkOut(locData.latitude, locData.longitude, locData.accuracy, token!);
+
+      const result =
+        action === 'check-in'
+          ? await checkIn(locData.latitude, locData.longitude, locData.accuracy, token!)
+          : await checkOut(locData.latitude, locData.longitude, locData.accuracy, token!);
 
       if (result.success) {
-        Alert.alert('Success', action === 'check-in' ? 'Attendance marked' : 'Checked out successfully');
+        Alert.alert('Success', action === 'check-in' ? 'Attendance marked successfully!' : 'Checked out successfully!');
         loadAttendance();
       } else {
-        Alert.alert(action === 'check-in' ? 'Attendance not marked' : 'Checkout failed', result.error?.message || 'Verification failed');
+        Alert.alert(
+          action === 'check-in' ? 'Attendance Not Marked' : 'Checkout Failed',
+          result.error?.message || 'Verification failed. Please ensure you are within the designated office boundary.'
+        );
       }
     } catch (err: any) {
-      Alert.alert('Unable to verify your location', err.message);
+      Alert.alert('Location Verification Failed', err.message || 'Unable to fetch your current GPS position.');
     } finally {
-      setLoading(false);
+      setActionLoading(false);
     }
   };
 
   const formatTime = (isoString: string | null) => {
     if (!isoString) return '--:--';
-    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata',
+      });
+    } catch {
+      return '--:--';
+    }
   };
 
   const formatDuration = (minutes: number) => {
-    if (!minutes) return '--:--';
+    if (!minutes || minutes <= 0) return '0h 0m';
     const h = Math.floor(minutes / 60);
     const m = Math.round(minutes % 60);
     return `${h}h ${m}m`;
   };
 
-  // Determine what UI state to show based on authorative backend status
   const status = attendance?.status || 'NOT_MARKED';
   const hasCheckedIn = !!attendance?.checkIn;
   const hasCheckedOut = !!attendance?.checkOut;
 
-  const statusDisplayMap: Record<string, string> = {
-    'NOT_MARKED': 'Attendance not marked',
-    'ABSENT': 'Attendance marked as absent',
-    'PRESENT': hasCheckedOut ? 'Attendance completed' : 'Checked In',
-    'HALF_DAY': 'Half Day',
-    'ON_LEAVE': 'On Leave',
-    'HALF_DAY_LEAVE': 'Half-Day Leave',
-    'CHECKOUT_MISSING': 'Checkout Missing',
-    'INSUFFICIENT_HOURS': 'Insufficient Hours',
-    'SUNDAY': 'Sunday',
-    'HOLIDAY': 'Holiday'
+  const getStatusBadge = () => {
+    if (hasCheckedOut) {
+      return { label: 'Completed', color: '#15803D', bg: '#DCFCE7', icon: 'checkmark-circle' as const };
+    }
+    if (hasCheckedIn) {
+      return { label: 'Checked In', color: '#1D4ED8', bg: '#DBEAFE', icon: 'time' as const };
+    }
+    if (status === 'ABSENT') {
+      return { label: 'Absent', color: '#B91C1C', bg: '#FEE2E2', icon: 'close-circle' as const };
+    }
+    if (status === 'HALF_DAY') {
+      return { label: 'Half Day', color: '#B45309', bg: '#FEF3C7', icon: 'alert-circle' as const };
+    }
+    if (status === 'ON_LEAVE') {
+      return { label: 'On Leave', color: '#1D4ED8', bg: '#EFF6FF', icon: 'airplane' as const };
+    }
+    if (status === 'SUNDAY' || status === 'HOLIDAY') {
+      return { label: status === 'SUNDAY' ? 'Sunday' : 'Holiday', color: '#0F766E', bg: '#CCFBF1', icon: 'cafe' as const };
+    }
+    return { label: 'Not Marked', color: '#64748B', bg: '#F1F5F9', icon: 'ellipse-outline' as const };
   };
 
-  const statusLabel = statusDisplayMap[status] || status;
+  const badge = getStatusBadge();
   const isWeekendOrHoliday = status === 'SUNDAY' || status === 'HOLIDAY';
-  // Allow check-in even if currently marked ABSENT due to passing the morning cutoff
   const showCompleted = status === 'ON_LEAVE' || isWeekendOrHoliday || hasCheckedOut;
-  const todayString = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Kolkata' });
 
-  if (user?.role === 'admin') {
+  const todayFormatted = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
+
+  const currentTimeFormatted = new Date().toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Kolkata',
+  });
+
+  if (user?.role?.toLowerCase() === 'admin') {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.headerContainer}>
-          <View style={styles.headerRow}>
-            <View style={styles.userInfo}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'A'}</Text>
-              </View>
-              <View>
-                <Text style={styles.greeting}>{greeting},</Text>
-                <Text style={styles.userName}>{user?.name || 'Admin User'}</Text>
-              </View>
+        <View style={styles.topBar}>
+          <View style={styles.userRow}>
+            <View style={styles.avatarRing}>
+              <Text style={styles.avatarLetter}>{user?.name?.charAt(0).toUpperCase() || 'A'}</Text>
             </View>
-            <TouchableOpacity onPress={logout} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={22} color="#444" />
-            </TouchableOpacity>
+            <View>
+              <Text style={styles.greetingText}>{greeting},</Text>
+              <Text style={styles.userNameText}>{user?.name || 'Administrator'}</Text>
+            </View>
           </View>
-          
-          <View style={styles.datePill}>
-            <Ionicons name="calendar" size={16} color="#007bff" />
-            <Text style={styles.dateText}>{todayString}</Text>
+          <View style={styles.topActions}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => navigation.navigate('Notifications')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={20} color="#334155" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.iconButton, { marginLeft: 8 }]} onPress={logout} activeOpacity={0.7}>
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            </TouchableOpacity>
           </View>
         </View>
 
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <Ionicons name="shield-checkmark" size={64} color="#007bff" style={{ marginBottom: 20 }} />
-          <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' }}>
-            Welcome Admin
+        <View style={styles.adminHero}>
+          <View style={styles.adminIconBox}>
+            <Ionicons name="shield-checkmark" size={48} color="#2563EB" />
+          </View>
+          <Text style={styles.adminTitle}>Admin Portal</Text>
+          <Text style={styles.adminDesc}>
+            As an organization administrator, your daily attendance is not tracked. Use the Admin tab below to monitor employee real-time activity, review attendance logs, and manage requests.
           </Text>
-          <Text style={{ fontSize: 16, color: '#666', textAlign: 'center', lineHeight: 24 }}>
-            As an administrator, you do not need to mark daily attendance. Please use the Admin tab to manage employees, review attendance, and handle leave requests.
-          </Text>
+          <TouchableOpacity
+            style={styles.adminActionBtn}
+            onPress={() => navigation.navigate('Admin')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="apps" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={styles.adminActionText}>Open Admin Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -137,132 +197,632 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.headerContainer}>
-        <View style={styles.headerRow}>
-          <View style={styles.userInfo}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() || 'A'}</Text>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadAttendance(true)}
+            colors={['#2563EB']}
+          />
+        }
+      >
+        {/* Top App Bar */}
+        <View style={styles.topBar}>
+          <View style={styles.userRow}>
+            <View style={styles.avatarRing}>
+              <Text style={styles.avatarLetter}>{user?.name?.charAt(0).toUpperCase() || 'E'}</Text>
             </View>
             <View>
-              <Text style={styles.greeting}>{greeting},</Text>
-              <Text style={styles.userName}>{user?.name || 'Aman'}</Text>
+              <Text style={styles.greetingText}>{greeting},</Text>
+              <Text style={styles.userNameText}>{user?.name || 'Employee'}</Text>
             </View>
           </View>
-          <TouchableOpacity onPress={logout} style={styles.logoutBtn}>
-            <Ionicons name="log-out-outline" size={22} color="#444" />
-          </TouchableOpacity>
-        </View>
-        
-        <View style={styles.datePill}>
-          <Ionicons name="calendar" size={16} color="#007bff" />
-          <Text style={styles.dateText}>{todayString}</Text>
-        </View>
-      </View>
 
-      {/* Main Action Area */}
-      <View style={styles.actionContainer}>
-        {loading ? (
-          <ActivityIndicator size="large" color="#007bff" />
-        ) : showCompleted ? (
-          <View style={styles.completedCard}>
-            <Ionicons 
-              name={
-                hasCheckedOut ? "checkmark-done-circle" : 
-                (status === 'ON_LEAVE' ? "calendar" : 
-                 isWeekendOrHoliday ? "cafe" : "close-circle")
-              } 
-              size={48} 
-              color={hasCheckedOut ? "#28a745" : (status === 'ON_LEAVE' ? "#17a2b8" : (isWeekendOrHoliday ? "#ffc107" : "#dc3545"))} 
-            />
-            <Text style={[styles.completedText, { color: hasCheckedOut ? "#28a745" : (status === 'ON_LEAVE' ? "#17a2b8" : (isWeekendOrHoliday ? "#ffc107" : "#dc3545")) }]}>
-              {statusLabel}
-            </Text>
-            {status === 'ON_LEAVE' && attendance?.leaveType && <Text style={{ color: '#666', marginTop: 5 }}>{attendance.leaveType}</Text>}
-            {status === 'HOLIDAY' && attendance?.holidayName && <Text style={{ color: '#666', marginTop: 5 }}>{attendance.holidayName}</Text>}
-            {status === 'SUNDAY' && <Text style={{ color: '#666', marginTop: 5 }}>Enjoy your day off!</Text>}
+          <View style={styles.topActions}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => navigation.navigate('Notifications')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="notifications-outline" size={20} color="#334155" />
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.iconButton, { marginLeft: 8 }]} onPress={logout} activeOpacity={0.7}>
+              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
+            </TouchableOpacity>
           </View>
-        ) : (
-          <TouchableOpacity 
-            style={[styles.mainButton, hasCheckedIn && styles.checkoutButton]}
-            onPress={() => handleAction(!hasCheckedIn ? 'check-in' : 'check-out')}
-            disabled={loading}
+        </View>
+
+        {/* Date & Shift Pill Banner */}
+        <View style={styles.bannerRow}>
+          <View style={styles.datePill}>
+            <Ionicons name="calendar-outline" size={14} color="#2563EB" />
+            <Text style={styles.datePillText}>{todayFormatted}</Text>
+          </View>
+          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+            <Ionicons name={badge.icon} size={13} color={badge.color} style={{ marginRight: 4 }} />
+            <Text style={[styles.statusBadgeText, { color: badge.color }]}>{badge.label}</Text>
+          </View>
+        </View>
+
+        {/* Hero Interactive Attendance Card */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroClockRow}>
+            <View>
+              <Text style={styles.heroClockTime}>{currentTimeFormatted}</Text>
+              <Text style={styles.heroClockLabel}>Office Hours: 09:00 AM - 07:00 PM</Text>
+            </View>
+            <View style={styles.gpsIndicator}>
+              <View style={styles.gpsDot} />
+              <Text style={styles.gpsText}>GPS Active</Text>
+            </View>
+          </View>
+
+          <View style={styles.heroDivider} />
+
+          {/* Action Button or Completed Card */}
+          {loading && !refreshing ? (
+            <View style={styles.loadingBox}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.loadingText}>Syncing status...</Text>
+            </View>
+          ) : showCompleted ? (
+            <View style={styles.completedContainer}>
+              <View style={[styles.completedIconCircle, { backgroundColor: badge.bg }]}>
+                <Ionicons name={badge.icon} size={36} color={badge.color} />
+              </View>
+              <Text style={[styles.completedTitle, { color: badge.color }]}>
+                {hasCheckedOut ? 'Day Complete' : badge.label}
+              </Text>
+              <Text style={styles.completedSubtitle}>
+                {hasCheckedOut
+                  ? `You checked out at ${formatTime(attendance?.checkOut || null)}. Great work today!`
+                  : status === 'ON_LEAVE'
+                  ? `Approved Leave: ${attendance?.leaveType || 'Annual Leave'}`
+                  : status === 'HOLIDAY'
+                  ? `Public Holiday: ${attendance?.holidayName || 'Holiday'}`
+                  : 'Enjoy your restful Sunday off!'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.actionSection}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={[
+                  styles.punchButton,
+                  hasCheckedIn ? styles.punchCheckoutBtn : styles.punchCheckinBtn,
+                  actionLoading && styles.btnDisabled,
+                ]}
+                onPress={() => handleAction(!hasCheckedIn ? 'check-in' : 'check-out')}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <ActivityIndicator size="large" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <View style={styles.punchIconCircle}>
+                      <Ionicons
+                        name={!hasCheckedIn ? 'finger-print' : 'log-out'}
+                        size={32}
+                        color={!hasCheckedIn ? '#2563EB' : '#DC2626'}
+                      />
+                    </View>
+                    <Text style={styles.punchButtonTitle}>
+                      {!hasCheckedIn ? 'PUNCH IN' : 'PUNCH OUT'}
+                    </Text>
+                    <Text style={styles.punchButtonSubtitle}>
+                      {!hasCheckedIn ? 'Tap to mark your arrival' : 'Tap to end your workday'}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              {attendance?.isLate && !hasCheckedIn && (
+                <View style={styles.lateNotice}>
+                  <Ionicons name="warning-outline" size={14} color="#B45309" />
+                  <Text style={styles.lateNoticeText}>
+                    You are checking in past the morning cutoff time.
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* Attendance Metrics Grid (Web-style cards) */}
+        <Text style={styles.sectionHeader}>Today's Overview</Text>
+        <View style={styles.metricsGrid}>
+          {/* Check In */}
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIconWrap, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="log-in-outline" size={18} color="#2563EB" />
+            </View>
+            <Text style={styles.metricLabel}>CHECK-IN</Text>
+            <Text style={styles.metricValue}>{formatTime(attendance?.checkIn || null)}</Text>
+            {attendance?.isLate ? (
+              <Text style={styles.lateBadge}>Late</Text>
+            ) : attendance?.checkIn ? (
+              <Text style={styles.onTimeBadge}>On Time</Text>
+            ) : null}
+          </View>
+
+          {/* Check Out */}
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIconWrap, { backgroundColor: '#FDF2F8' }]}>
+              <Ionicons name="log-out-outline" size={18} color="#DB2777" />
+            </View>
+            <Text style={styles.metricLabel}>CHECK-OUT</Text>
+            <Text style={styles.metricValue}>{formatTime(attendance?.checkOut || null)}</Text>
+            <Text style={styles.metricSubtext}>{hasCheckedOut ? 'Recorded' : 'Pending'}</Text>
+          </View>
+
+          {/* Working Hours */}
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIconWrap, { backgroundColor: '#ECFDF5' }]}>
+              <Ionicons name="hourglass-outline" size={18} color="#059669" />
+            </View>
+            <Text style={styles.metricLabel}>WORK DURATION</Text>
+            <Text style={styles.metricValue}>{formatDuration(attendance?.workingMinutes || 0)}</Text>
+            <Text style={styles.metricSubtext}>Target: 9h</Text>
+          </View>
+
+          {/* Shift Status */}
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIconWrap, { backgroundColor: '#FFFBEB' }]}>
+              <Ionicons name="briefcase-outline" size={18} color="#D97706" />
+            </View>
+            <Text style={styles.metricLabel}>SHIFT STATUS</Text>
+            <Text style={[styles.metricValue, { fontSize: 15 }]}>{badge.label}</Text>
+            <Text style={styles.metricSubtext}>Regular Shift</Text>
+          </View>
+        </View>
+
+        {/* Quick Navigation Cards */}
+        <Text style={styles.sectionHeader}>Quick Services</Text>
+        <View style={styles.servicesRow}>
+          <TouchableOpacity
+            style={styles.serviceCard}
+            onPress={() => navigation.navigate('History')}
+            activeOpacity={0.7}
           >
-            <Text style={styles.mainButtonText}>
-              {!hasCheckedIn ? 'CHECK IN' : 'CHECK OUT'}
-            </Text>
-            {attendance?.isLate && !hasCheckedIn && <Text style={{ color: 'white', marginTop: 4 }}>You are late!</Text>}
+            <View style={[styles.serviceIconCircle, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="calendar" size={22} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.serviceTitle}>Monthly History</Text>
+              <Text style={styles.serviceDesc}>View attendance calendar & hours</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
           </TouchableOpacity>
-        )}
-      </View>
 
-      {/* Attendance Summary */}
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryTitle}>Today's Attendance</Text>
-        
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Status</Text>
-          <Text style={styles.summaryValue}>{statusLabel}</Text>
+          <TouchableOpacity
+            style={styles.serviceCard}
+            onPress={() => navigation.navigate('Profile')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.serviceIconCircle, { backgroundColor: '#F0FDF4' }]}>
+              <Ionicons name="person" size={22} color="#16A34A" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.serviceTitle}>Employee Profile</Text>
+              <Text style={styles.serviceDesc}>Designation, ID & credentials</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+          </TouchableOpacity>
         </View>
-
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Check-in</Text>
-          <Text style={styles.summaryValue}>{formatTime(attendance?.checkIn || null)} {attendance?.isLate ? '(Late)' : ''}</Text>
-        </View>
-        
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Check-out</Text>
-          <Text style={styles.summaryValue}>{formatTime(attendance?.checkOut || null)}</Text>
-        </View>
-        
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Working</Text>
-          <Text style={styles.summaryValue}>{formatDuration(attendance?.workingMinutes || 0)}</Text>
-        </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#f4f6f9', 
-    paddingHorizontal: 20, 
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 40) + 10 : 10 
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 0,
   },
-  headerContainer: { marginBottom: 30, marginTop: 10 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  userInfo: { flexDirection: 'row', alignItems: 'center' },
-  avatar: { 
-    width: 50, height: 50, borderRadius: 25, 
-    backgroundColor: '#007bff', 
-    justifyContent: 'center', alignItems: 'center',
-    marginRight: 15,
-    shadowColor: '#007bff', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 5, elevation: 5
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingBottom: 40,
   },
-  avatarText: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
-  greeting: { fontSize: 14, color: '#888', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-  userName: { fontSize: 24, fontWeight: 'bold', color: '#1a1a1a' },
-  logoutBtn: { 
-    padding: 10, backgroundColor: '#fff', borderRadius: 12, 
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  userRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatarRing: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: '#BFDBFE',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  avatarLetter: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  greetingText: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  userNameText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+    letterSpacing: -0.3,
+  },
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  bannerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   datePill: {
-    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
-    backgroundColor: '#e6f2ff', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20,
-    marginTop: 15
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
   },
-  dateText: { marginLeft: 6, fontSize: 14, fontWeight: '600', color: '#007bff' },
-  actionContainer: { alignItems: 'center', justifyContent: 'center', minHeight: 120, marginBottom: 30 },
-  mainButton: { backgroundColor: '#007bff', borderRadius: 16, width: '100%', paddingVertical: 20, alignItems: 'center', elevation: 4 },
-  checkoutButton: { backgroundColor: '#dc3545' },
-  mainButtonText: { color: '#fff', fontSize: 20, fontWeight: 'bold', letterSpacing: 1 },
-  completedCard: { alignItems: 'center', padding: 20 },
-  completedText: { marginTop: 10, fontSize: 16, fontWeight: '600' },
-  summaryCard: { backgroundColor: '#fff', borderRadius: 16, padding: 20, elevation: 2 },
-  summaryTitle: { fontSize: 18, fontWeight: '600', color: '#333', marginBottom: 20 },
-  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  summaryLabel: { fontSize: 16, color: '#666' },
-  summaryValue: { fontSize: 16, fontWeight: '600', color: '#333' },
+  datePillText: {
+    marginLeft: 6,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E40AF',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 3,
+    marginBottom: 24,
+  },
+  heroClockRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  heroClockTime: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.5,
+  },
+  heroClockLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  gpsIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+  },
+  gpsDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16A34A',
+    marginRight: 5,
+  },
+  gpsText: {
+    fontSize: 11,
+    color: '#15803D',
+    fontWeight: '600',
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: '#F1F5F9',
+    marginVertical: 18,
+  },
+  loadingBox: {
+    alignItems: 'center',
+    paddingVertical: 28,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  completedContainer: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  completedIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  completedTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  completedSubtitle: {
+    fontSize: 14,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 12,
+  },
+  actionSection: {
+    alignItems: 'center',
+  },
+  punchButton: {
+    width: '100%',
+    paddingVertical: 20,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  punchCheckinBtn: {
+    backgroundColor: '#2563EB',
+    shadowColor: '#2563EB',
+  },
+  punchCheckoutBtn: {
+    backgroundColor: '#DC2626',
+    shadowColor: '#DC2626',
+  },
+  btnDisabled: {
+    opacity: 0.7,
+  },
+  punchIconCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  punchButtonTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 1.5,
+  },
+  punchButtonSubtitle: {
+    fontSize: 12,
+    color: 'rgba(255, 255, 255, 0.85)',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  lateNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  lateNoticeText: {
+    marginLeft: 6,
+    color: '#B45309',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  sectionHeader: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12,
+    letterSpacing: -0.2,
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  metricCard: {
+    width: '48%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  metricIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  metricLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  metricValue: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 4,
+  },
+  metricSubtext: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  lateBadge: {
+    fontSize: 11,
+    color: '#DC2626',
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  onTimeBadge: {
+    fontSize: 11,
+    color: '#16A34A',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  servicesRow: {
+    gap: 10,
+  },
+  serviceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  serviceIconCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  serviceTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  serviceDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  adminHero: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  adminIconBox: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  adminTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0F172A',
+    marginBottom: 10,
+  },
+  adminDesc: {
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 28,
+  },
+  adminActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2563EB',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  adminActionText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
 });
+

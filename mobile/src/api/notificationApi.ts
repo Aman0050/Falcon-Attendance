@@ -5,16 +5,27 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 
 
 export interface Notification {
   id: number;
-  type: string;
-  attendance_date: string;
+  recipientUserId?: number;
+  senderUserId?: number;
+  role?: string | null;
+  title?: string;
   message: string;
-  sent_at: string;
-  read_at: string | null;
+  type: string;
+  priority?: 'Low' | 'Medium' | 'High' | 'Critical' | string;
+  actionUrl?: string | null;
+  icon?: string | null;
+  isRead?: boolean;
+  read_at?: string | null;
+  createdAt?: string;
+  created_at?: string;
+  sentAt?: string;
+  sent_at?: string;
+  attendance_date?: string;
 }
 
-export const getNotifications = async (token: string) => {
+export const getNotifications = async (token: string, page = 1, limit = 50) => {
   try {
-    const res = await axios.get(`${API_URL}/api/notifications`, {
+    const res = await axios.get(`${API_URL}/api/notifications?page=${page}&limit=${limit}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     return res.data;
@@ -44,3 +55,4 @@ export const markAllAsRead = async (token: string) => {
     return error.response?.data || { success: false, error: { message: 'Network error' } };
   }
 };
+
