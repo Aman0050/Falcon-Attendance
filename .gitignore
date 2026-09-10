@@ -3,5 +3,13 @@ backend/node_modules/
 mobile/node_modules/
 backend/.env
 mobile/.env
+admin/.env
+database/.env
 .idea/
 .vscode/
+*.zip
+test_report.pdf
+test_report.xlsx
+*.tsbuildinfo
+backend/uploads/
+

@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { query } from '../db';
 import { getAttendanceSettings } from './attendanceStatusService';
+import { NotificationService } from './notificationService';
 
 export function startScheduler() {
   // Quarterly Credit Engine - Runs every day at 00:01
@@ -116,35 +117,40 @@ export function startScheduler() {
               AND to_date >= $2
           `, [user.id, dateStr]);
 
-          let attendanceStatus = 'Absent';
+          let attendanceStatus = 'ABSENT';
           
           if (leaveRes.rows.length > 0) {
-            attendanceStatus = leaveRes.rows[0].leave_type === 'Paid Leave' ? 'Paid Leave' : 'Leave Without Pay';
+            attendanceStatus = leaveRes.rows[0].leave_type === 'Paid Leave' ? 'PAID LEAVE' : 'LEAVE WITHOUT PAY';
           }
 
-          if (attendanceStatus === 'Absent') {
+          if (attendanceStatus === 'ABSENT') {
             try {
-              await query(`
-                INSERT INTO notifications (employee_id, type, attendance_date, message)
-                VALUES ($1, 'ABSENCE', $2, 'Attendance not marked today. You have been marked absent.')
-              `, [user.id, dateStr]);
+              const alreadyNotified = await query(
+                `SELECT id FROM notifications WHERE recipient_user_id = $1 AND title = 'Attendance Marked Absent' AND attendance_date = $2`,
+                [user.id, dateStr]
+              );
+              if (alreadyNotified.rows.length === 0) {
+                await NotificationService.notifyUser(user.id, {
+                  title: 'Attendance Marked Absent',
+                  message: 'Attendance not marked today. You have been marked absent.',
+                  type: 'Attendance',
+                  priority: 'Critical',
+                  actionUrl: '/my-attendance',
+                  attendanceDate: dateStr,
+                });
+              }
             } catch (e: any) {
-              if (e.code !== '23505') console.error('Failed to insert absence notification:', e);
+              console.error('Failed to insert absence notification:', e);
             }
           }
-          
-          // Wait, we need to insert an attendance record for 'Absent', 'Paid Leave', 'Leave Without Pay' 
-          // because if they are absent, there is NO record. To make reports show "Present, Absent, Paid Leave...",
-          // the attendance table should have a record with status = attendanceStatus.
-          // Let's insert/update attendance record.
           
           try {
             const attCheck = await query(`SELECT id FROM attendance WHERE employee_id = $1 AND attendance_date = $2`, [user.id, dateStr]);
             if (attCheck.rows.length === 0) {
               await query(`
                 INSERT INTO attendance (employee_id, office_id, attendance_date, check_in, status)
-                VALUES ($1, (SELECT id FROM offices LIMIT 1), $2, CURRENT_TIMESTAMP, $3)
-              `, [user.id, dateStr, attendanceStatus]); // Fake check_in timestamp to satisfy NOT NULL constraint
+                VALUES ($1, (SELECT id FROM offices LIMIT 1), $2, NULL, $3)
+              `, [user.id, dateStr, attendanceStatus]);
             }
           } catch (e) {
             console.error('Failed to insert absence attendance record:', e);
@@ -153,16 +159,23 @@ export function startScheduler() {
 
         // Admin Notification
         if (absentCount > 0) {
-          const adminsRes = await query(`SELECT id FROM users WHERE role = 'admin' AND status = 'active'`);
-          for (const admin of adminsRes.rows) {
-            try {
-              await query(`
-                INSERT INTO notifications (employee_id, type, attendance_date, message)
-                VALUES ($1, 'ADMIN_DAILY_ABSENCE', $2, $3)
-              `, [admin.id, dateStr, `${absentCount} employees have not marked attendance.`]);
-            } catch (e: any) {
-              if (e.code !== '23505') console.error('Failed to insert admin absence notification:', e);
+          try {
+            const alreadyNotified = await query(
+              `SELECT id FROM notifications WHERE role = 'admin' AND title = 'Daily Attendance Alert' AND attendance_date = $1`,
+              [dateStr]
+            );
+            if (alreadyNotified.rows.length === 0) {
+              await NotificationService.notifyAdmins({
+                title: 'Daily Attendance Alert',
+                message: `${absentCount} employee(s) have not marked attendance today.`,
+                type: 'Attendance',
+                priority: 'High',
+                actionUrl: '/attendance',
+                attendanceDate: dateStr,
+              });
             }
+          } catch (e: any) {
+            console.error('Failed to insert admin absence notification:', e);
           }
         }
       }
@@ -181,12 +194,22 @@ export function startScheduler() {
 
         for (const att of missingRes.rows) {
           try {
-            await query(`
-              INSERT INTO notifications (employee_id, type, attendance_date, message)
-              VALUES ($1, 'MISSING_CHECKOUT', $2, 'You checked in today but have not checked out.')
-            `, [att.employee_id, dateStr]);
+            const alreadyNotified = await query(
+              `SELECT id FROM notifications WHERE recipient_user_id = $1 AND title = 'Forgot to Check-Out' AND attendance_date = $2`,
+              [att.employee_id, dateStr]
+            );
+            if (alreadyNotified.rows.length === 0) {
+              await NotificationService.notifyUser(att.employee_id, {
+                title: 'Forgot to Check-Out',
+                message: 'You checked in today but have not checked out. Please remember to check out.',
+                type: 'Attendance',
+                priority: 'High',
+                actionUrl: '/my-attendance',
+                attendanceDate: dateStr,
+              });
+            }
           } catch (e: any) {
-            if (e.code !== '23505') console.error('Failed to insert checkout notification:', e);
+            console.error('Failed to insert checkout notification:', e);
           }
         }
       }

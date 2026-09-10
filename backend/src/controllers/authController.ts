@@ -53,6 +53,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     // Don't send the password hash back
     const { password_hash, ...userWithoutPassword } = user;
+    (userWithoutPassword as any).profilePhotoUrl = user.profile_photo_url;
 
     res.json({
       message: 'Login successful',
@@ -79,7 +80,7 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
     }
 
     const result = await query(
-      `SELECT id, employee_id, name, email, phone, role, status, created_at FROM users WHERE id = $1`,
+      `SELECT id, employee_id, name, email, phone, role, status, profile_photo_url, profile_photo_url as "profilePhotoUrl", created_at FROM users WHERE id = $1`,
       [req.user.id]
     );
 

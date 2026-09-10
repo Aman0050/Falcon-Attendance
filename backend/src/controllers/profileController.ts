@@ -3,10 +3,12 @@ import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
+import { processAndSaveProfilePhoto, deleteProfilePhotoFile } from '../middlewares/upload';
+import { NotificationService } from '../services/notificationService';
 
 const updateProfileSchema = z.object({
   phone: z.string().max(20).optional(),
-  profilePhotoUrl: z.string().url().max(1000).optional().or(z.literal('')),
+  profilePhotoUrl: z.string().max(1000).nullable().optional().or(z.literal('')),
   name: z.string().min(2).max(100).optional(),
 });
 
@@ -113,9 +115,73 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
     const hashed = await bcrypt.hash(newPassword, 10);
     await query(`UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [hashed, userId]);
 
+    // Send security notification to user
+    try {
+      await NotificationService.notifyUser(userId, {
+        title: 'Password Changed Successfully',
+        message: 'Your account password was updated. If you did not make this change, please contact your administrator immediately.',
+        type: 'Security',
+        priority: 'Critical',
+        actionUrl: '/profile',
+      });
+    } catch (notifErr) {
+      console.warn('Password change notification error:', notifErr);
+    }
+
     res.json({ success: true, message: 'Password changed successfully' });
   } catch (error) {
     console.error('changePassword error:', error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to change password' } });
   }
 };
+
+export const uploadProfilePhotoHandler = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.id;
+    if (!req.file) {
+      res.status(400).json({ success: false, error: { message: 'No photo file provided' } });
+      return;
+    }
+
+    const photoUrl = await processAndSaveProfilePhoto(req.file.buffer, `user-${userId}`);
+
+    const userRes = await query(`SELECT profile_photo_url FROM users WHERE id = $1`, [userId]);
+    if (userRes.rows.length > 0 && userRes.rows[0].profile_photo_url) {
+      await deleteProfilePhotoFile(userRes.rows[0].profile_photo_url);
+    }
+
+    await query(`UPDATE users SET profile_photo_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [photoUrl, userId]);
+
+    res.json({
+      success: true,
+      data: {
+        profilePhotoUrl: photoUrl,
+      },
+      message: 'Profile photo updated successfully',
+    });
+  } catch (error: any) {
+    console.error('uploadProfilePhotoHandler error:', error);
+    res.status(500).json({ success: false, error: { message: error.message || 'Failed to upload photo' } });
+  }
+};
+
+export const deleteProfilePhotoHandler = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user!.id;
+    const userRes = await query(`SELECT profile_photo_url FROM users WHERE id = $1`, [userId]);
+    if (userRes.rows.length > 0 && userRes.rows[0].profile_photo_url) {
+      await deleteProfilePhotoFile(userRes.rows[0].profile_photo_url);
+    }
+
+    await query(`UPDATE users SET profile_photo_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [userId]);
+
+    res.json({
+      success: true,
+      message: 'Profile photo removed successfully',
+    });
+  } catch (error: any) {
+    console.error('deleteProfilePhotoHandler error:', error);
+    res.status(500).json({ success: false, error: { message: error.message || 'Failed to remove photo' } });
+  }
+};
+

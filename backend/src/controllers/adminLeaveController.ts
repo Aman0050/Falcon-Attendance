@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
 import { z } from 'zod';
+import { NotificationService } from '../services/notificationService';
 
 export const isInitialized = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -100,7 +101,7 @@ export const getAdminLeaves = async (req: AuthRequest, res: Response): Promise<v
 
     const histRes = await query(`
       SELECT lr.id, u.name as employee_name, u.employee_id as employee_code, lr.leave_type as "leaveType",
-             lr.from_date, lr.to_date, lr.days, lr.reason, lr.status, lr.created_at
+             lr.from_date, lr.to_date, lr.days, lr.reason, lr.status, lr.created_at, u.profile_photo_url as profile_photo_url
       FROM leave_requests lr
       JOIN users u ON lr.employee_id = u.id
       ${filterQuery}
@@ -115,6 +116,7 @@ export const getAdminLeaves = async (req: AuthRequest, res: Response): Promise<v
           id: rec.id,
           employeeName: rec.employee_name,
           employeeId: rec.employee_code,
+          profilePhotoUrl: rec.profile_photo_url,
           leaveType: rec.leaveType,
           startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
           endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
@@ -209,6 +211,20 @@ export const approveLeave = async (req: AuthRequest, res: Response): Promise<voi
     `, [adminId, leaveId]);
 
     await client.query('COMMIT');
+
+    // Notify employee of approval
+    try {
+      await NotificationService.notifyUser(lr.employee_id, {
+        title: 'Leave Request Approved',
+        message: `Your ${lr.leave_type} request for ${new Date(lr.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })} (${lr.days} day(s)) has been approved.`,
+        type: 'Leave',
+        priority: 'High',
+        actionUrl: '/my-leave',
+      });
+    } catch (notifErr) {
+      console.warn('Approve leave notification error:', notifErr);
+    }
+
     res.json({ success: true, message: 'Leave approved' });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -232,7 +248,7 @@ export const rejectLeave = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const existRes = await query(`SELECT status FROM leave_requests WHERE id = $1`, [leaveId]);
+    const existRes = await query(`SELECT employee_id, leave_type, from_date, days, status FROM leave_requests WHERE id = $1`, [leaveId]);
     if (existRes.rows.length === 0) {
       res.status(404).json({ success: false, error: { code: 'LEAVE_NOT_FOUND', message: 'Request not found' } });
       return;
@@ -248,6 +264,19 @@ export const rejectLeave = async (req: AuthRequest, res: Response): Promise<void
       SET status = 'REJECTED', remarks = $1, approved_by = $2, approved_at = CURRENT_TIMESTAMP
       WHERE id = $3
     `, [parsed.data.comment, adminId, leaveId]);
+
+    // Notify employee of rejection
+    try {
+      await NotificationService.notifyUser(existRes.rows[0].employee_id, {
+        title: 'Leave Request Rejected',
+        message: `Your ${existRes.rows[0].leave_type} request was rejected. Reason: ${parsed.data.comment}`,
+        type: 'Leave',
+        priority: 'High',
+        actionUrl: '/my-leave',
+      });
+    } catch (notifErr) {
+      console.warn('Reject leave notification error:', notifErr);
+    }
 
     res.json({ success: true, message: 'Leave rejected' });
   } catch (error) {

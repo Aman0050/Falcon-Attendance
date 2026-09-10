@@ -110,7 +110,7 @@ export const getAttendance = async (req: AuthRequest, res: Response): Promise<vo
         `}
       )
       SELECT a.id, a.attendance_date, a.check_in, a.check_out, a.working_minutes, a.computed_status as status,
-             u.name as employee_name, u.employee_id as employee_code
+             u.name as employee_name, u.employee_id as employee_code, u.profile_photo_url as profile_photo_url
       FROM combined a
       JOIN users u ON a.employee_id = u.id
       ${filterQuery.replace(/a\.status/g, 'a.computed_status')}
@@ -121,16 +121,21 @@ export const getAttendance = async (req: AuthRequest, res: Response): Promise<vo
     res.json({
       success: true,
       data: {
-        items: histRes.rows.map(rec => ({
-          attendanceId: rec.id,
-          employeeName: rec.employee_name,
-          employeeId: rec.employee_code,
-          date: new Date(rec.attendance_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
-          checkIn: rec.check_in,
-          checkOut: rec.check_out,
-          workingMinutes: rec.working_minutes ? Math.round(rec.working_minutes) : 0,
-          status: rec.status
-        })),
+        items: histRes.rows.map(rec => {
+          const st = (rec.status || '').toUpperCase();
+          const isAbsentOrLeave = st === 'ABSENT' || st.includes('LEAVE');
+          return {
+            attendanceId: rec.id,
+            employeeName: rec.employee_name,
+            employeeId: rec.employee_code,
+            profilePhotoUrl: rec.profile_photo_url,
+            date: new Date(rec.attendance_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+            checkIn: isAbsentOrLeave ? null : rec.check_in,
+            checkOut: isAbsentOrLeave ? null : rec.check_out,
+            workingMinutes: isAbsentOrLeave ? 0 : (rec.working_minutes ? Math.round(rec.working_minutes) : 0),
+            status: rec.status?.toUpperCase() || 'ABSENT'
+          };
+        }),
         pagination: { page, limit, total, totalPages }
       }
     });
@@ -155,6 +160,7 @@ export const getDailySummary = async (req: AuthRequest, res: Response): Promise<
       SELECT 
         u.id,
         COALESCE(a.status, CASE WHEN el.status IS NOT NULL THEN el.status ELSE 'ABSENT' END) as status,
+        a.check_in,
         a.check_out
       FROM users u
       LEFT JOIN attendance a ON u.id = a.employee_id AND a.attendance_date = $1
@@ -175,11 +181,14 @@ export const getDailySummary = async (req: AuthRequest, res: Response): Promise<
     let checkedOut = 0;
 
     attRes.rows.forEach(r => {
-      if (r.status === 'PRESENT') present++;
-      if (r.status === 'ABSENT') absent++;
-      if (r.status === 'LATE') late++;
-      if (r.status === 'ON LEAVE') onLeave++;
-      if (r.status !== 'ON LEAVE' && r.status !== 'ABSENT') {
+      const st = (r.status || '').toUpperCase();
+      if (st === 'PRESENT') present++;
+      else if (st === 'ABSENT') absent++;
+      else if (st === 'LATE') late++;
+      else if (st === 'ON LEAVE' || st.includes('LEAVE')) onLeave++;
+
+      // Checked In/Out only applies if employee actually checked in and is not absent or on leave
+      if (st !== 'ABSENT' && !st.includes('LEAVE') && r.check_in) {
         if (r.check_out) checkedOut++;
         else checkedIn++;
       }

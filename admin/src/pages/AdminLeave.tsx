@@ -1,9 +1,23 @@
-import { useState, useEffect } from 'react';
-import { Container, Card, Table, Badge, Button, Form, Modal, Pagination, Alert } from 'react-bootstrap';
+import React, { useState, useEffect } from 'react';
+import { Form, Modal, Pagination, Alert, Spinner } from 'react-bootstrap';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import {
+  CalendarRange,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import Avatar from '../components/common/Avatar';
+import ImagePreviewModal from '../components/common/ImagePreviewModal';
 
 export default function AdminLeave() {
+  const { token } = useAuth();
   const [leaves, setLeaves] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -13,21 +27,23 @@ export default function AdminLeave() {
   const [selectedLeave, setSelectedLeave] = useState<number | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [error, setError] = useState('');
-  
+
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [previewEmployee, setPreviewEmployee] = useState<any>(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
-    checkInit();
-  }, []);
+    if (token) checkInit();
+  }, [token]);
 
   useEffect(() => {
-    fetchLeaves();
-  }, [page, statusFilter]);
+    if (token) fetchLeaves();
+  }, [page, statusFilter, token]);
 
   const checkInit = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/leave/is-initialized`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/leave/is-initialized`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.data.data.initialized) {
@@ -41,149 +57,280 @@ export default function AdminLeave() {
   const fetchLeaves = async () => {
     try {
       setLoading(true);
-      const token = localStorage.getItem('token');
-      const res = await axios.get(`${import.meta.env.VITE_API_URL}/api/admin/leave?page=${page}&status=${statusFilter}`, {
+      const res = await axios.get(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/leave?page=${page}&status=${statusFilter}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setLeaves(res.data.data.items);
-      setTotalPages(res.data.data.pagination.totalPages);
-      setLoading(false);
+      setLeaves(res.data.data.items || []);
+      setTotalPages(res.data.data.pagination.totalPages || 1);
     } catch (err) {
       console.error(err);
+    } finally {
       setLoading(false);
     }
   };
 
   const handleApprove = async (id: number) => {
-    if (!window.confirm('Are you sure you want to approve this leave?')) return;
+    if (!window.confirm('Are you sure you want to approve this leave request?')) return;
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${import.meta.env.VITE_API_URL}/api/admin/leave/${id}/approve`, {}, {
+      await axios.patch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/leave/${id}/approve`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       fetchLeaves();
     } catch (err: any) {
-      alert(err.response?.data?.error?.message || 'Failed to approve');
+      alert(err.response?.data?.error?.message || err.response?.data?.error || 'Failed to approve');
     }
   };
 
   const handleReject = async () => {
-    if (!rejectReason || rejectReason.length < 3) {
-      setError('Please provide a valid rejection reason.');
+    if (!rejectReason || rejectReason.trim().length < 3) {
+      setError('Please provide a valid reason for rejection (min 3 characters).');
       return;
     }
     try {
-      const token = localStorage.getItem('token');
-      await axios.patch(`${import.meta.env.VITE_API_URL}/api/admin/leave/${selectedLeave}/reject`, { comment: rejectReason }, {
+      await axios.patch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/leave/${selectedLeave}/reject`, { comment: rejectReason }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setShowRejectModal(false);
       setRejectReason('');
       fetchLeaves();
     } catch (err: any) {
-      setError(err.response?.data?.error?.message || 'Failed to reject');
+      setError(err.response?.data?.error?.message || err.response?.data?.error || 'Failed to reject leave');
     }
   };
 
+  const getInitials = (name?: string) => {
+    if (!name) return 'U';
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  };
+
   return (
-    <Container className="mt-4 mb-5">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>Leave Management</h2>
+    <div>
+      {/* Header */}
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
+        <div>
+          <h1 className="page-title">Leave Management</h1>
+          <p className="text-muted mb-0">Review employee leave applications and balances</p>
+        </div>
       </div>
 
-      <Card className="shadow-sm">
-        <Card.Body>
-          <div className="mb-3 d-flex align-items-center" style={{ maxWidth: '300px' }}>
-            <Form.Label className="me-2 mb-0 fw-bold">Status:</Form.Label>
-            <Form.Select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-              <option value="All">All Requests</option>
-              <option value="PENDING">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-              <option value="CANCELLED">Cancelled</option>
-            </Form.Select>
-          </div>
-
-          <Table responsive hover className="align-middle">
-            <thead className="table-light">
-              <tr>
-                <th>Emp ID</th>
-                <th>Name</th>
-                <th>Leave Type</th>
-                <th>Dates</th>
-                <th>Days</th>
-                <th>Reason</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={8} className="text-center py-4">Loading...</td></tr>
-              ) : leaves.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-4 text-muted">No leave requests found.</td></tr>
-              ) : (
-                leaves.map(lr => (
-                  <tr key={lr.id}>
-                    <td>{lr.employeeId}</td>
-                    <td>{lr.employeeName}</td>
-                    <td><Badge bg="info">{lr.leaveType}</Badge></td>
-                    <td>{lr.startDate} to {lr.endDate}</td>
-                    <td>{lr.totalDays}</td>
-                    <td style={{ maxWidth: '200px' }} className="text-truncate" title={lr.reason}>{lr.reason}</td>
-                    <td>
-                      <Badge bg={lr.status === 'APPROVED' ? 'success' : lr.status === 'REJECTED' ? 'danger' : lr.status === 'CANCELLED' ? 'secondary' : 'warning'}>
-                        {lr.status}
-                      </Badge>
-                    </td>
-                    <td>
-                      {lr.status === 'PENDING' && (
-                        <div className="d-flex gap-2">
-                          <Button size="sm" variant="success" onClick={() => handleApprove(lr.id)}>Approve</Button>
-                          <Button size="sm" variant="danger" onClick={() => { setSelectedLeave(lr.id); setShowRejectModal(true); }}>Reject</Button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </Table>
-
-          {totalPages > 1 && (
-            <div className="d-flex justify-content-end mt-3">
-              <Pagination>
-                <Pagination.Prev disabled={page === 1} onClick={() => setPage(p => p - 1)} />
-                <Pagination.Item active>{page}</Pagination.Item>
-                <Pagination.Next disabled={page === totalPages} onClick={() => setPage(p => p + 1)} />
-              </Pagination>
+      {/* Filter Card */}
+      <div className="card p-4 mb-4">
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-3">
+          <div className="d-flex align-items-center gap-3">
+            <Filter size={16} className="text-muted" />
+            <span className="fw-semibold text-dark" style={{ fontSize: '14px' }}>Filter Status:</span>
+            <div className="d-flex gap-2 flex-wrap">
+              {['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'All'].map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  className={`btn btn-sm ${statusFilter === st ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    setStatusFilter(st);
+                    setPage(1);
+                  }}
+                >
+                  {st === 'All' ? 'All Requests' : st.charAt(0) + st.slice(1).toLowerCase()}
+                </button>
+              ))}
             </div>
-          )}
-        </Card.Body>
-      </Card>
+          </div>
+        </div>
+      </div>
 
-      <Modal show={showRejectModal} onHide={() => { setShowRejectModal(false); setError(''); }}>
+      {/* Table Card */}
+      <div className="card p-0 overflow-hidden">
+        {loading ? (
+          <div className="text-center py-5">
+            <Spinner animation="border" variant="primary" />
+            <div className="text-muted mt-2" style={{ fontSize: '14px' }}>Loading leave requests...</div>
+          </div>
+        ) : (
+          <>
+            <div className="table-responsive" style={{ border: 'none', borderRadius: 0 }}>
+              <table className="table table-hover mb-0">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Employee ID</th>
+                    <th>Leave Type</th>
+                    <th>Dates</th>
+                    <th>Days</th>
+                    <th>Reason</th>
+                    <th>Status</th>
+                    <th className="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {leaves.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="text-center py-5 text-muted">
+                        No leave requests found for the selected filter.
+                      </td>
+                    </tr>
+                  ) : (
+                    leaves.map((lr) => (
+                      <tr key={lr.id}>
+                        <td>
+                          <div className="d-flex align-items-center gap-3">
+                            <Avatar
+                              src={lr.profilePhotoUrl}
+                              name={lr.employeeName}
+                              size={36}
+                              shape="rounded"
+                              showBorder
+                              borderColor="rgba(226, 232, 240, 0.8)"
+                              onClick={() => {
+                                setPreviewEmployee(lr);
+                                setShowPreviewModal(true);
+                              }}
+                            />
+                            <div className="fw-semibold text-dark" style={{ fontSize: '14px' }}>
+                              {lr.employeeName}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="badge bg-secondary font-monospace" style={{ fontSize: '12px' }}>
+                            {lr.employeeId}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="badge bg-info">{lr.leaveType}</span>
+                        </td>
+                        <td style={{ color: '#475569', fontSize: '13.5px' }}>
+                          {lr.startDate} to {lr.endDate}
+                        </td>
+                        <td>
+                          <span className="fw-semibold text-dark">{lr.totalDays}</span> day(s)
+                        </td>
+                        <td style={{ maxWidth: '220px' }}>
+                          <div className="text-truncate text-muted" title={lr.reason} style={{ fontSize: '13.5px' }}>
+                            {lr.reason || '-'}
+                          </div>
+                        </td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              lr.status === 'APPROVED'
+                                ? 'bg-success'
+                                : lr.status === 'REJECTED'
+                                ? 'bg-danger'
+                                : lr.status === 'PENDING'
+                                ? 'bg-warning'
+                                : 'bg-secondary'
+                            }`}
+                          >
+                            {lr.status}
+                          </span>
+                        </td>
+                        <td className="text-end">
+                          {lr.status === 'PENDING' ? (
+                            <div className="d-inline-flex gap-2">
+                              <button
+                                className="btn btn-success btn-sm"
+                                onClick={() => handleApprove(lr.id)}
+                                title="Approve leave"
+                              >
+                                <CheckCircle2 size={14} />
+                                <span>Approve</span>
+                              </button>
+                              <button
+                                className="btn btn-outline-danger btn-sm"
+                                onClick={() => {
+                                  setSelectedLeave(lr.id);
+                                  setShowRejectModal(true);
+                                }}
+                                title="Reject leave"
+                              >
+                                <XCircle size={14} />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-muted small">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="d-flex align-items-center justify-content-between p-3 border-top bg-white">
+                <span className="text-muted" style={{ fontSize: '13px' }}>
+                  Showing page {page} of {totalPages}
+                </span>
+                <Pagination className="mb-0">
+                  <Pagination.Prev disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                    <ChevronLeft size={14} />
+                  </Pagination.Prev>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                    .map((p, idx, arr) => (
+                      <React.Fragment key={p}>
+                        {idx > 0 && arr[idx - 1] !== p - 1 && <Pagination.Ellipsis disabled />}
+                        <Pagination.Item active={page === p} onClick={() => setPage(p)}>
+                          {p}
+                        </Pagination.Item>
+                      </React.Fragment>
+                    ))}
+                  <Pagination.Next disabled={page === totalPages} onClick={() => setPage((p) => p + 1)}>
+                    <ChevronRight size={14} />
+                  </Pagination.Next>
+                </Pagination>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Reject Reason Modal */}
+      <Modal show={showRejectModal} onHide={() => { setShowRejectModal(false); setError(''); }} centered>
         <Modal.Header closeButton>
           <Modal.Title>Reject Leave Request</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          {error && <Alert variant="danger">{error}</Alert>}
+          {error && (
+            <Alert variant="danger" className="d-flex align-items-center gap-2 mb-3">
+              <AlertCircle size={15} />
+              <span>{error}</span>
+            </Alert>
+          )}
           <Form.Group>
-            <Form.Label>Reason for Rejection</Form.Label>
+            <Form.Label>Reason for Rejection *</Form.Label>
             <Form.Control
               as="textarea"
               rows={3}
               value={rejectReason}
-              onChange={e => setRejectReason(e.target.value)}
-              placeholder="Enter reason..."
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="State why this leave request is being declined..."
             />
           </Form.Group>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowRejectModal(false)}>Cancel</Button>
-          <Button variant="danger" onClick={handleReject}>Reject Leave</Button>
+          <button className="btn btn-secondary" onClick={() => setShowRejectModal(false)}>
+            Cancel
+          </button>
+          <button className="btn btn-danger" onClick={handleReject}>
+            Confirm Rejection
+          </button>
         </Modal.Footer>
       </Modal>
-    </Container>
+
+      <ImagePreviewModal
+        show={showPreviewModal}
+        onHide={() => setShowPreviewModal(false)}
+        src={previewEmployee?.profilePhotoUrl}
+        name={previewEmployee?.employeeName}
+        employeeId={previewEmployee?.employeeId}
+        role="Employee"
+      />
+    </div>
   );
 }

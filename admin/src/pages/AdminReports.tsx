@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Form, Button, Table, Spinner, Modal, Badge, Pagination } from 'react-bootstrap';
+import { Row, Col, Form, Spinner, Modal, Badge, Pagination, Alert } from 'react-bootstrap';
 import axios from 'axios';
+import {
+  FileBarChart,
+  Download,
+  Search,
+  Filter,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Calendar,
+  Clock,
+  TrendingUp,
+  AlertCircle
+} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -9,7 +23,7 @@ export default function AdminReports() {
   const { token } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   const [reportData, setReportData] = useState<any>(null);
   const [employeesList, setEmployeesList] = useState<any[]>([]);
 
@@ -22,7 +36,7 @@ export default function AdminReports() {
   const [selectedEmployee, setSelectedEmployee] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
   const [search, setSearch] = useState('');
-  
+
   // Pagination & Sort
   const [page, setPage] = useState(1);
   const [sortField, setSortField] = useState('name');
@@ -33,12 +47,12 @@ export default function AdminReports() {
   const [activeEmpReport, setActiveEmpReport] = useState<any>(null);
 
   useEffect(() => {
-    fetchEmployees();
+    if (token) fetchEmployees();
   }, [token]);
 
   useEffect(() => {
-    fetchReport();
-  }, [page, sortField, sortOrder, token]); // Re-fetch on pagination or sort
+    if (token) fetchReport();
+  }, [page, sortField, sortOrder, token]);
 
   const fetchEmployees = async () => {
     try {
@@ -58,7 +72,7 @@ export default function AdminReports() {
     setError(null);
     try {
       let url = `${API_URL}/api/admin/reports/attendance?page=${page}&limit=20&sort=${sortField}&order=${sortOrder}`;
-      
+
       if (filterMode === 'month') {
         url += `&month=${month}&year=${year}`;
       } else {
@@ -72,7 +86,7 @@ export default function AdminReports() {
 
       if (selectedEmployee) url += `&employeeId=${selectedEmployee}`;
       if (selectedStatus && selectedStatus !== 'All') url += `&status=${selectedStatus}`;
-      if (search) url += `&search=${search}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
 
       const res = await axios.get(url, {
         headers: { Authorization: `Bearer ${token}` }
@@ -81,7 +95,7 @@ export default function AdminReports() {
       if (res.data.success) {
         setReportData(res.data.data);
       } else {
-        setError(res.data.error?.message || 'Error loading report');
+        setError(res.data.error?.message || res.data.error || 'Error loading report');
       }
     } catch (err: any) {
       setError('Unable to load attendance report.');
@@ -100,7 +114,7 @@ export default function AdminReports() {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder('desc'); // Default to desc for numbers
+      setSortOrder('desc');
     }
     setPage(1);
   };
@@ -115,7 +129,7 @@ export default function AdminReports() {
       }
       if (selectedEmployee) url += `&employeeId=${selectedEmployee}`;
       if (selectedStatus && selectedStatus !== 'All') url += `&status=${selectedStatus}`;
-      if (search) url += `&search=${search}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
 
       window.open(url, '_blank');
     } catch (err) {
@@ -124,6 +138,7 @@ export default function AdminReports() {
   };
 
   const formatHours = (minutes: number) => {
+    if (!minutes && minutes !== 0) return '-';
     const h = Math.floor(minutes / 60);
     const m = Math.floor(minutes % 60);
     return `${h}h ${m}m`;
@@ -135,243 +150,426 @@ export default function AdminReports() {
   };
 
   const getStatusBadge = (status: string) => {
-    switch(status) {
-      case 'PRESENT': return <Badge bg="success">PRESENT</Badge>;
-      case 'ABSENT': return <Badge bg="danger">ABSENT</Badge>;
-      case 'HALF_DAY': return <Badge bg="warning" text="dark">HALF DAY</Badge>;
-      case 'ON_LEAVE': return <Badge bg="info">ON LEAVE</Badge>;
-      case 'HOLIDAY': return <Badge bg="primary">HOLIDAY</Badge>;
-      case 'SUNDAY': return <Badge bg="secondary">SUNDAY</Badge>;
-      default: return <Badge bg="light" text="dark">{status}</Badge>;
+    switch (status) {
+      case 'PRESENT':
+        return <span className="badge badge-success">PRESENT</span>;
+      case 'ABSENT':
+        return <span className="badge badge-danger">ABSENT</span>;
+      case 'INSUFFICIENT_HOURS':
+        return (
+          <span
+            className="badge"
+            style={{ backgroundColor: '#FFEDD5', color: '#C2410C', border: '1px solid #FED7AA' }}
+          >
+            INSUFFICIENT HRS
+          </span>
+        );
+      case 'CHECKOUT_MISSING':
+        return (
+          <span
+            className="badge"
+            style={{ backgroundColor: '#F3E8FF', color: '#7E22CE', border: '1px solid #E9D5FF' }}
+          >
+            MISSING CHECKOUT
+          </span>
+        );
+      case 'HALF_DAY':
+        return <span className="badge badge-warning">HALF DAY</span>;
+      case 'ON_LEAVE':
+        return <span className="badge badge-info">ON LEAVE</span>;
+      case 'HOLIDAY':
+        return <span className="badge badge-primary">HOLIDAY</span>;
+      case 'SUNDAY':
+        return <span className="badge badge-neutral">SUNDAY</span>;
+      default:
+        return <span className="badge badge-neutral">{status}</span>;
     }
   };
 
+  const getInitials = (name?: string) => {
+    if (!name) return 'U';
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.slice(0, 2).toUpperCase();
+  };
+
   return (
-    <Container className="mt-4 mb-5">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>Admin Attendance Reports</h2>
+    <div>
+      {/* Header */}
+      <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3 mb-4">
         <div>
-          <Button variant="outline-success" className="me-2" onClick={() => handleExport('excel')}>Export Excel</Button>
-          <Button variant="outline-danger" onClick={() => handleExport('pdf')}>Export PDF</Button>
+          <h1 className="page-title">Attendance Reports</h1>
+          <p className="text-muted mb-0">Export comprehensive monthly reports and analyze attendance metrics</p>
+        </div>
+        <div className="d-flex align-items-center gap-2">
+          <button className="btn btn-secondary" onClick={() => handleExport('excel')}>
+            <Download size={15} />
+            <span>Export Excel</span>
+          </button>
+          <button className="btn btn-primary" onClick={() => handleExport('pdf')}>
+            <Download size={15} />
+            <span>Export PDF</span>
+          </button>
         </div>
       </div>
 
-      <Card className="mb-4">
-        <Card.Body>
-          <Row className="g-3">
-            <Col md={3}>
+      {/* Filter Card */}
+      <div className="card p-4 mb-4">
+        <Row className="g-3">
+          <Col md={3}>
+            <Form.Group>
               <Form.Label>Filter Mode</Form.Label>
               <Form.Select value={filterMode} onChange={(e: any) => setFilterMode(e.target.value)}>
-                <option value="month">Month</option>
-                <option value="range">Date Range</option>
+                <option value="month">By Month</option>
+                <option value="range">Custom Date Range</option>
               </Form.Select>
-            </Col>
+            </Form.Group>
+          </Col>
 
-            {filterMode === 'month' ? (
-              <>
-                <Col md={2}>
+          {filterMode === 'month' ? (
+            <>
+              <Col md={2}>
+                <Form.Group>
                   <Form.Label>Month</Form.Label>
                   <Form.Select value={month} onChange={(e) => setMonth(Number(e.target.value))}>
-                    {Array.from({length: 12}, (_, i) => i + 1).map(m => (
-                      <option key={m} value={m}>{new Date(2000, m - 1).toLocaleString('default', { month: 'long' })}</option>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <option key={m} value={m}>
+                        {new Date(2000, m - 1).toLocaleString('default', { month: 'long' })}
+                      </option>
                     ))}
                   </Form.Select>
-                </Col>
-                <Col md={2}>
+                </Form.Group>
+              </Col>
+              <Col md={2}>
+                <Form.Group>
                   <Form.Label>Year</Form.Label>
                   <Form.Select value={year} onChange={(e) => setYear(Number(e.target.value))}>
-                    {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                    {[2024, 2025, 2026, 2027].map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
                   </Form.Select>
-                </Col>
-              </>
-            ) : (
-              <>
-                <Col md={2}>
+                </Form.Group>
+              </Col>
+            </>
+          ) : (
+            <>
+              <Col md={2}>
+                <Form.Group>
                   <Form.Label>From Date</Form.Label>
-                  <Form.Control type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
-                </Col>
-                <Col md={2}>
+                  <Form.Control
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={2}>
+                <Form.Group>
                   <Form.Label>To Date</Form.Label>
-                  <Form.Control type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
-                </Col>
-              </>
-            )}
+                  <Form.Control
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                  />
+                </Form.Group>
+              </Col>
+            </>
+          )}
 
-            <Col md={2}>
+          <Col md={2}>
+            <Form.Group>
               <Form.Label>Employee</Form.Label>
-              <Form.Select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)}>
+              <Form.Select
+                value={selectedEmployee}
+                onChange={(e) => setSelectedEmployee(e.target.value)}
+              >
                 <option value="">All Employees</option>
-                {employeesList.map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                {employeesList.map((emp) => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </option>
                 ))}
               </Form.Select>
-            </Col>
+            </Form.Group>
+          </Col>
 
-            <Col md={2}>
+          <Col md={2}>
+            <Form.Group>
               <Form.Label>Status</Form.Label>
-              <Form.Select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)}>
-                <option value="All">All</option>
-                <option value="PRESENT">PRESENT</option>
-                <option value="ABSENT">ABSENT</option>
-                <option value="HALF_DAY">HALF DAY</option>
-                <option value="ON_LEAVE">ON LEAVE</option>
+              <Form.Select
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+              >
+                <option value="">All Statuses</option>
+                <option value="PRESENT">Present</option>
+                <option value="ABSENT">Absent</option>
+                <option value="INSUFFICIENT_HOURS">Insufficient Hours</option>
+                <option value="CHECKOUT_MISSING">Checkout Missing</option>
+                <option value="HALF_DAY">Half Day</option>
+                <option value="ON_LEAVE">On Leave</option>
               </Form.Select>
-            </Col>
+            </Form.Group>
+          </Col>
 
-            <Col md={3}>
-              <Form.Label>Search Name/ID</Form.Label>
-              <Form.Control type="text" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
-            </Col>
+          <Col md={3}>
+            <Form.Group>
+              <Form.Label>Search Employee</Form.Label>
+              <Form.Control
+                type="text"
+                placeholder="Name or ID..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </Form.Group>
+          </Col>
 
-            <Col md={2} className="d-flex align-items-end">
-              <Button variant="primary" className="w-100" onClick={handleApplyFilters}>Apply Filters</Button>
-            </Col>
-          </Row>
-        </Card.Body>
-      </Card>
+          <Col md={12} className="d-flex justify-content-end pt-2">
+            <button className="btn btn-primary" onClick={handleApplyFilters}>
+              <Filter size={15} />
+              <span>Apply Filters</span>
+            </button>
+          </Col>
+        </Row>
+      </div>
 
       {loading ? (
-        <div className="text-center my-5">
-          <Spinner animation="border" role="status"><span className="visually-hidden">Loading report...</span></Spinner>
-          <div className="mt-2 text-muted">Loading report...</div>
+        <div className="text-center py-5">
+          <Spinner animation="border" variant="primary" />
+          <div className="text-muted mt-2" style={{ fontSize: '14px' }}>Compiling report data...</div>
         </div>
       ) : error ? (
-        <div className="text-center my-5 text-danger">
-          <p>{error}</p>
-          <Button variant="outline-primary" onClick={handleApplyFilters}>Retry</Button>
-        </div>
+        <Alert variant="danger" className="mb-4 d-flex align-items-center justify-content-between">
+          <div className="d-flex align-items-center gap-2">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+          <button className="btn btn-sm btn-secondary" onClick={handleApplyFilters}>Retry</button>
+        </Alert>
       ) : reportData && (
         <>
-          <Row className="mb-4 text-center g-3">
+          {/* Metrics Grid */}
+          <div className="row g-3 mb-4 text-center">
             {[
-              { label: 'Total Employees', val: reportData.summary.employees },
-              { label: 'Working Days', val: reportData.summary.workingDays },
-              { label: 'Present', val: reportData.summary.present },
-              { label: 'Absent', val: reportData.summary.absent },
-              { label: 'Half Day', val: reportData.summary.halfDay },
-              { label: 'On Leave', val: reportData.summary.onLeave },
-              { label: 'Late', val: reportData.summary.late },
+              { label: 'Total Expected', val: `${reportData.summary.totalExpectedDays || 0} Days` },
+              { label: 'Present', val: reportData.summary.present, color: '#15803D' },
+              { label: 'Absent', val: reportData.summary.absent, color: '#B91C1C' },
+              { label: 'Insufficient', val: reportData.summary.insufficientHours || 0, color: '#C2410C' },
+              { label: 'Missing Out', val: reportData.summary.checkoutMissing || 0, color: '#7E22CE' },
+              { label: 'Half Day', val: reportData.summary.halfDay, color: '#B45309' },
+              { label: 'On Leave', val: reportData.summary.onLeave, color: '#1D4ED8' },
+              { label: 'Late', val: reportData.summary.late, color: '#D97706' },
               { label: 'Total Hours', val: formatHours(reportData.summary.totalWorkingMinutes) },
-              { label: 'Attendance %', val: `${reportData.summary.attendancePercentage}%`, textClass: 'text-primary fw-bold' }
+              { label: 'Attendance %', val: `${reportData.summary.attendancePercentage}%`, color: '#2563EB', isBold: true }
             ].map((stat, idx) => (
               <Col key={idx} xs={6} md={3} lg={true}>
-                <Card className="h-100 shadow-sm border-0 bg-light">
-                  <Card.Body className="p-2 d-flex flex-column justify-content-center">
-                    <div className="text-muted small">{stat.label}</div>
-                    <div className={`fs-4 ${stat.textClass || ''}`}>{stat.val}</div>
-                  </Card.Body>
-                </Card>
+                <div className="card h-100 p-3">
+                  <div className="text-muted" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {stat.label}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '20px',
+                      fontWeight: stat.isBold ? 700 : 600,
+                      color: stat.color || '#0F172A',
+                      marginTop: '4px'
+                    }}
+                  >
+                    {stat.val}
+                  </div>
+                </div>
               </Col>
             ))}
-          </Row>
+          </div>
 
-          <Card className="shadow-sm">
-            <Card.Body className="p-0">
-              <Table responsive hover className="mb-0">
-                <thead className="table-light">
+          {/* Table Card */}
+          <div className="card p-0 overflow-hidden mb-4">
+            <div className="table-responsive" style={{ border: 'none', borderRadius: 0 }}>
+              <table className="table table-hover mb-0">
+                <thead>
                   <tr>
-                    <th style={{cursor: 'pointer'}} onClick={() => handleSort('name')}>Employee {sortField === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
-                    <th style={{cursor: 'pointer'}} onClick={() => handleSort('present')}>Present {sortField === 'present' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
+                    <th style={{ cursor: 'pointer' }} onClick={() => handleSort('name')}>
+                      <div className="d-flex align-items-center gap-1">
+                        <span>Employee</span>
+                        <ArrowUpDown size={13} className="text-muted" />
+                      </div>
+                    </th>
+                    <th style={{ cursor: 'pointer' }} onClick={() => handleSort('present')}>
+                      <div className="d-flex align-items-center gap-1">
+                        <span>Present</span>
+                        <ArrowUpDown size={13} className="text-muted" />
+                      </div>
+                    </th>
                     <th>Absent</th>
+                    <th>Insufficient</th>
+                    <th>Missing Out</th>
                     <th>Half Day</th>
                     <th>Leave</th>
                     <th>Late</th>
                     <th>Total Hours</th>
-                    <th style={{cursor: 'pointer'}} onClick={() => handleSort('attendancePercentage')}>Att % {sortField === 'attendancePercentage' && (sortOrder === 'asc' ? '↑' : '↓')}</th>
-                    <th>Action</th>
+                    <th style={{ cursor: 'pointer' }} onClick={() => handleSort('attendancePercentage')}>
+                      <div className="d-flex align-items-center gap-1">
+                        <span>Att %</span>
+                        <ArrowUpDown size={13} className="text-muted" />
+                      </div>
+                    </th>
+                    <th className="text-end">Action</th>
                   </tr>
                 </thead>
                 <tbody>
                   {reportData.employees.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-4 text-muted">No attendance records found for the selected filters.</td>
+                      <td colSpan={11} className="text-center py-5 text-muted">
+                        No attendance records found for the selected filter criteria.
+                      </td>
                     </tr>
                   ) : (
                     reportData.employees.map((emp: any) => (
-                      <tr key={emp.id} className="align-middle">
+                      <tr key={emp.id}>
                         <td>
-                          <div className="fw-bold">{emp.name}</div>
-                          <div className="text-muted small">{emp.email}</div>
+                          <div className="d-flex align-items-center gap-3">
+                            <div
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '10px',
+                                background: '#EFF6FF',
+                                color: 'var(--primary-color)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {getInitials(emp.name)}
+                            </div>
+                            <div>
+                              <div className="fw-semibold text-dark" style={{ fontSize: '14px' }}>
+                                {emp.name}
+                              </div>
+                              <div className="text-muted" style={{ fontSize: '12.5px' }}>
+                                {emp.email}
+                              </div>
+                            </div>
+                          </div>
                         </td>
-                        <td>{emp.summary.present}</td>
-                        <td>{emp.summary.absent}</td>
-                        <td>{emp.summary.halfDay}</td>
+                        <td className="fw-semibold text-success">{emp.summary.present}</td>
+                        <td className="text-danger">{emp.summary.absent}</td>
+                        <td style={{ color: '#C2410C', fontWeight: 600 }}>{emp.summary.insufficientHours || 0}</td>
+                        <td style={{ color: '#7E22CE', fontWeight: 600 }}>{emp.summary.checkoutMissing || 0}</td>
+                        <td className="text-warning">{emp.summary.halfDay}</td>
                         <td>{emp.summary.onLeave}</td>
                         <td>{emp.summary.late}</td>
                         <td>{formatHours(emp.summary.totalWorkingMinutes)}</td>
-                        <td className="fw-bold text-primary">{emp.summary.attendancePercentage}%</td>
                         <td>
-                          <Button variant="outline-primary" size="sm" onClick={() => {
-                            setActiveEmpReport(emp);
-                            setShowModal(true);
-                          }}>Details</Button>
+                          <span className="fw-bold text-primary">{emp.summary.attendancePercentage}%</span>
+                        </td>
+                        <td className="text-end">
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setActiveEmpReport(emp);
+                              setShowModal(true);
+                            }}
+                          >
+                            <Eye size={13} />
+                            <span>Details</span>
+                          </button>
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
-              </Table>
-            </Card.Body>
-          </Card>
-
-          {/* Pagination */}
-          {reportData.pagination.totalPages > 1 && (
-            <div className="d-flex justify-content-center mt-4">
-              <Pagination>
-                <Pagination.Prev disabled={page === 1} onClick={() => setPage(p => p - 1)} />
-                {[...Array(reportData.pagination.totalPages)].map((_, idx) => (
-                  <Pagination.Item key={idx + 1} active={page === idx + 1} onClick={() => setPage(idx + 1)}>
-                    {idx + 1}
-                  </Pagination.Item>
-                ))}
-                <Pagination.Next disabled={page === reportData.pagination.totalPages} onClick={() => setPage(p => p + 1)} />
-              </Pagination>
+              </table>
             </div>
-          )}
+
+            {/* Pagination */}
+            {reportData.pagination?.totalPages > 1 && (
+              <div className="d-flex align-items-center justify-content-between p-3 border-top bg-white">
+                <span className="text-muted" style={{ fontSize: '13px' }}>
+                  Showing page {page} of {reportData.pagination.totalPages}
+                </span>
+                <Pagination className="mb-0">
+                  <Pagination.Prev disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
+                    <ChevronLeft size={14} />
+                  </Pagination.Prev>
+                  {Array.from({ length: reportData.pagination.totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === reportData.pagination.totalPages || Math.abs(p - page) <= 1)
+                    .map((p, idx, arr) => (
+                      <React.Fragment key={p}>
+                        {idx > 0 && arr[idx - 1] !== p - 1 && <Pagination.Ellipsis disabled />}
+                        <Pagination.Item active={page === p} onClick={() => setPage(p)}>
+                          {p}
+                        </Pagination.Item>
+                      </React.Fragment>
+                    ))}
+                  <Pagination.Next
+                    disabled={page === reportData.pagination.totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
+                    <ChevronRight size={14} />
+                  </Pagination.Next>
+                </Pagination>
+              </div>
+            )}
+          </div>
         </>
       )}
 
-      <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
+      {/* Drill-down Modal */}
+      <Modal show={showModal} onHide={() => setShowModal(false)} size="lg" centered>
         <Modal.Header closeButton>
-          <Modal.Title>{activeEmpReport?.name} - Daily Details</Modal.Title>
+          <Modal.Title>{activeEmpReport?.name} — Daily Breakdown</Modal.Title>
         </Modal.Header>
         <Modal.Body className="p-0">
-          <Table responsive hover className="mb-0">
-            <thead className="table-light">
-              <tr>
-                <th>Date</th>
-                <th>Day</th>
-                <th>Status</th>
-                <th>Check-in</th>
-                <th>Check-out</th>
-                <th>Working Hours</th>
-                <th>Remarks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeEmpReport?.daily?.map((d: any, idx: number) => (
-                <tr key={idx}>
-                  <td>{d.date}</td>
-                  <td>{d.day}</td>
-                  <td>{getStatusBadge(d.status)} {d.isLate && <Badge bg="warning" text="dark" className="ms-1">LATE</Badge>}</td>
-                  <td>{formatTime(d.checkIn)}</td>
-                  <td>{formatTime(d.checkOut)}</td>
-                  <td>{formatHours(d.workingMinutes)}</td>
-                  <td className="text-muted small">{d.leaveType || d.holidayName || ''}</td>
-                </tr>
-              ))}
-              {activeEmpReport?.daily?.length === 0 && (
+          <div className="table-responsive" style={{ border: 'none', borderRadius: 0 }}>
+            <table className="table table-hover mb-0">
+              <thead>
                 <tr>
-                  <td colSpan={7} className="text-center py-3 text-muted">No records matched the filter criteria for this employee.</td>
+                  <th>Date</th>
+                  <th>Day</th>
+                  <th>Status</th>
+                  <th>Check-in</th>
+                  <th>Check-out</th>
+                  <th>Working Hours</th>
+                  <th>Remarks</th>
                 </tr>
-              )}
-            </tbody>
-          </Table>
+              </thead>
+              <tbody>
+                {activeEmpReport?.daily?.map((d: any, idx: number) => (
+                  <tr key={idx}>
+                    <td>{d.date}</td>
+                    <td className="text-muted">{d.day}</td>
+                    <td>
+                      <div className="d-flex align-items-center gap-1">
+                        {getStatusBadge(d.status)}
+                        {d.isLate && <span className="badge bg-warning">LATE</span>}
+                      </div>
+                    </td>
+                    <td>{formatTime(d.checkIn)}</td>
+                    <td>{formatTime(d.checkOut)}</td>
+                    <td>{formatHours(d.workingMinutes)}</td>
+                    <td className="text-muted small">{d.leaveType || d.holidayName || '-'}</td>
+                  </tr>
+                ))}
+                {activeEmpReport?.daily?.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="text-center py-4 text-muted">
+                      No records matched the filter criteria for this employee.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowModal(false)}>Close</Button>
+          <button className="btn btn-secondary" onClick={() => setShowModal(false)}>
+            Close
+          </button>
         </Modal.Footer>
       </Modal>
-    </Container>
+    </div>
   );
 }

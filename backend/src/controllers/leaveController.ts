@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { z } from 'zod';
 import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
+import { NotificationService } from '../services/notificationService';
 
 const applyLeaveSchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
@@ -158,6 +159,28 @@ export const applyLeave = async (req: AuthRequest, res: Response): Promise<void>
     }
 
     await client.query('COMMIT');
+
+    // Trigger Smart Notifications
+    try {
+      await NotificationService.notifyAdmins({
+        title: 'New Leave Request',
+        message: `${req.user!.name || 'An employee'} applied for leave from ${startDate} to ${endDate}.`,
+        type: 'Leave',
+        priority: 'Medium',
+        actionUrl: '/leave',
+      });
+
+      await NotificationService.notifyUser(employeeId, {
+        title: 'Leave Request Submitted',
+        message: `Your leave request for ${startDate} to ${endDate} has been submitted for approval.`,
+        type: 'Leave',
+        priority: 'Low',
+        actionUrl: '/my-leave',
+      });
+    } catch (notifErr) {
+      console.warn('Leave apply notification error:', notifErr);
+    }
+
     res.json({ success: true, data: { leaveIds: insertedIds, status: 'PENDING' } });
   } catch (error) {
     const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();

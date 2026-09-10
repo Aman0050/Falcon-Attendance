@@ -4,6 +4,8 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
+import { processAndSaveProfilePhoto, deleteProfilePhotoFile } from '../middlewares/upload';
+import { NotificationService } from '../services/notificationService';
 
 const createEmployeeSchema = z.object({
   name: z.string().min(2).max(100),
@@ -11,10 +13,22 @@ const createEmployeeSchema = z.object({
   phone: z.string().max(20).optional(),
   department: z.string().max(100).optional(),
   designation: z.string().max(100).optional(),
-  joiningDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format').optional(),
+  joiningDate: z
+    .union([
+      z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Invalid date format'),
+      z.literal(''),
+      z.null()
+    ])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (!v || v === '') return null;
+      return v.substring(0, 10);
+    }),
   role: z.enum(['employee', 'admin']).default('employee'),
   customEmployeeId: z.string().max(50).optional(),
   password: z.string().min(6).max(100).optional(),
+  profilePhotoUrl: z.string().nullable().optional(),
 });
 
 const editEmployeeSchema = createEmployeeSchema.partial();
@@ -57,7 +71,7 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
 
     const usersRes = await query(`
       SELECT id, employee_id as "employeeId", name, email, phone, department, 
-             designation, joining_date as "joiningDate", status, role, created_at as "createdAt"
+             designation, joining_date as "joiningDate", status, role, profile_photo_url as "profilePhotoUrl", created_at as "createdAt"
       FROM users
       ${filterQuery}
       ORDER BY id DESC
@@ -170,7 +184,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const { name, email, phone, department, designation, joiningDate, role, customEmployeeId, password } = parsed.data;
+    const { name, email, phone, department, designation, joiningDate, role, customEmployeeId, password, profilePhotoUrl } = parsed.data;
 
     // Check email
     const emailRes = await client.query(`SELECT id FROM users WHERE email = $1`, [email]);
@@ -202,16 +216,30 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
     const hashed = await bcrypt.hash(tempPassword, 10);
 
     const insertQuery = `
-      INSERT INTO users (employee_id, name, email, phone, department, designation, joining_date, role, password_hash, status)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active')
-      RETURNING id, employee_id as "employeeId"
+      INSERT INTO users (employee_id, name, email, phone, department, designation, joining_date, role, password_hash, status, profile_photo_url)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10)
+      RETURNING id, employee_id as "employeeId", profile_photo_url as "profilePhotoUrl"
     `;
-    const insertParams = [employeeCode, name, email, phone || null, department || null, designation || null, joiningDate || null, role, hashed];
+    const insertParams = [employeeCode, name, email, phone || null, department || null, designation || null, joiningDate || null, role, hashed, profilePhotoUrl || null];
 
     const result = await client.query(insertQuery, insertParams);
 
     await client.query('COMMIT');
-    res.json({ success: true, data: { id: result.rows[0].id, employeeId: result.rows[0].employeeId, tempPassword: password ? 'User defined password' : tempPassword } });
+
+    // Notify admins
+    try {
+      await NotificationService.notifyAdmins({
+        title: 'New Employee Registration',
+        message: `Employee ${name} (${result.rows[0].employeeId}) was registered in ${department || 'General'}.`,
+        type: 'Employee',
+        priority: 'Medium',
+        actionUrl: '/employees',
+      });
+    } catch (notifErr) {
+      console.warn('Create employee notification error:', notifErr);
+    }
+
+    res.json({ success: true, data: { id: result.rows[0].id, employeeId: result.rows[0].employeeId, profilePhotoUrl: result.rows[0].profilePhotoUrl, tempPassword: password ? 'User defined password' : tempPassword } });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('createEmployee error:', error);
@@ -230,7 +258,7 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const { name, email, phone, department, designation, joiningDate, role } = parsed.data;
+    const { name, email, phone, department, designation, joiningDate, role, profilePhotoUrl } = parsed.data;
 
     let updateQuery = 'UPDATE users SET updated_at = CURRENT_TIMESTAMP';
     const params: any[] = [];
@@ -250,6 +278,18 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
     addField(joiningDate, 'joining_date');
     addField(role, 'role');
 
+    if (profilePhotoUrl !== undefined) {
+      if (profilePhotoUrl === null || profilePhotoUrl === '') {
+        const oldRes = await query(`SELECT profile_photo_url FROM users WHERE id = $1`, [id]);
+        if (oldRes.rows.length > 0 && oldRes.rows[0].profile_photo_url) {
+          await deleteProfilePhotoFile(oldRes.rows[0].profile_photo_url);
+        }
+        addField(null, 'profile_photo_url');
+      } else {
+        addField(profilePhotoUrl, 'profile_photo_url');
+      }
+    }
+
     if (params.length === 0) {
       res.status(400).json({ success: false, error: { code: 'NO_UPDATES', message: 'No fields to update' } });
       return;
@@ -260,10 +300,77 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
 
     await query(updateQuery, params);
 
+    // Notify employee that their profile was updated
+    try {
+      await NotificationService.notifyUser(id, {
+        title: 'Profile Updated',
+        message: 'Your employee profile details were updated by an administrator.',
+        type: 'Profile',
+        priority: 'Medium',
+        actionUrl: '/profile',
+      });
+    } catch (notifErr) {
+      console.warn('Edit employee notification error:', notifErr);
+    }
+
     res.json({ success: true, message: 'Employee updated successfully' });
   } catch (error) {
     console.error('editEmployee error:', error);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update employee' } });
+  }
+};
+
+export const uploadEmployeePhoto = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id ? parseInt(req.params.id as string) : null;
+    if (!req.file) {
+      res.status(400).json({ success: false, error: { message: 'No photo file provided' } });
+      return;
+    }
+
+    const photoUrl = await processAndSaveProfilePhoto(req.file.buffer, id ? `emp-${id}` : 'avatar');
+
+    if (id) {
+      const userRes = await query(`SELECT profile_photo_url FROM users WHERE id = $1`, [id]);
+      if (userRes.rows.length > 0 && userRes.rows[0].profile_photo_url) {
+        await deleteProfilePhotoFile(userRes.rows[0].profile_photo_url);
+      }
+      await query(`UPDATE users SET profile_photo_url = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [photoUrl, id]);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        url: photoUrl,
+        profilePhotoUrl: photoUrl
+      },
+      message: 'Profile photo uploaded and processed successfully'
+    });
+  } catch (error: any) {
+    console.error('uploadEmployeePhoto error:', error);
+    res.status(500).json({ success: false, error: { message: error.message || 'Failed to upload photo' } });
+  }
+};
+
+export const deleteEmployeePhoto = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const userRes = await query(`SELECT profile_photo_url FROM users WHERE id = $1`, [id]);
+    if (userRes.rows.length === 0) {
+      res.status(404).json({ success: false, error: { message: 'User not found' } });
+      return;
+    }
+
+    const oldUrl = userRes.rows[0].profile_photo_url;
+    if (oldUrl) {
+      await deleteProfilePhotoFile(oldUrl);
+    }
+
+    await query(`UPDATE users SET profile_photo_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+    res.json({ success: true, message: 'Profile photo removed successfully' });
+  } catch (error: any) {
+    console.error('deleteEmployeePhoto error:', error);
+    res.status(500).json({ success: false, error: { message: error.message || 'Failed to remove photo' } });
   }
 };
 
@@ -317,30 +424,29 @@ export const deleteEmployee = async (req: AuthRequest, res: Response): Promise<v
   try {
     const id = parseInt(req.params.id as string);
     if (id === req.user!.id) {
-      res.status(400).json({ success: false, error: { code: 'INVALID_ACTION', message: 'Cannot delete yourself' } });
+      res.status(400).json({ success: false, error: { code: 'INVALID_ACTION', message: 'Cannot delete your own account' } });
       return;
     }
-    
-    // First, verify status is inactive to prevent accidental deletion of active employees
-    const userRes = await query(`SELECT status FROM users WHERE id = $1`, [id]);
+
+    const userRes = await query(`SELECT id, name, profile_photo_url FROM users WHERE id = $1`, [id]);
     if (userRes.rows.length === 0) {
       res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } });
       return;
     }
-    
-    if (userRes.rows[0].status !== 'inactive') {
-      res.status(400).json({ success: false, error: { code: 'INVALID_ACTION', message: 'Can only delete INACTIVE employees' } });
-      return;
+
+    const user = userRes.rows[0];
+
+    // Clean up uploaded profile photo file if present
+    if (user.profile_photo_url) {
+      await deleteProfilePhotoFile(user.profile_photo_url);
     }
 
+    // Completely delete employee (cascades to attendance, leaves, balances, notifications, tokens)
     await query(`DELETE FROM users WHERE id = $1`, [id]);
-    res.json({ success: true, message: 'Employee deleted successfully' });
+
+    res.json({ success: true, message: `Employee ${user.name} and all associated records have been completely deleted` });
   } catch (error: any) {
     console.error('deleteEmployee error:', error);
-    if (error.code === '23503') { // PostgreSQL foreign_key_violation
-      res.status(400).json({ success: false, error: { code: 'FOREIGN_KEY_VIOLATION', message: 'Cannot delete employee because they have attendance or leave records. Please keep them as INACTIVE instead.' } });
-    } else {
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to delete employee' } });
-    }
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to delete employee' } });
   }
 };

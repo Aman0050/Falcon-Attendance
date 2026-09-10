@@ -1,0 +1,89 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const adminController_1 = require("../controllers/adminController");
+const adminReportController_1 = require("../controllers/adminReportController");
+const adminLeaveController_1 = require("../controllers/adminLeaveController");
+const adminEmployeeController_1 = require("../controllers/adminEmployeeController");
+const settingsController_1 = require("../controllers/settingsController");
+const auth_1 = require("../middlewares/auth");
+const upload_1 = require("../middlewares/upload");
+const db_1 = require("../db");
+const router = (0, express_1.Router)();
+router.use(auth_1.authenticateToken);
+router.use((0, auth_1.requireRole)('admin'));
+router.get('/notifications', async (req, res) => {
+    try {
+        const notifRes = await (0, db_1.query)(`
+      SELECT * FROM notifications 
+      WHERE type = 'ADMIN_DAILY_ABSENCE' 
+      ORDER BY sent_at DESC 
+      LIMIT 100
+    `);
+        res.json({ success: true, data: notifRes.rows });
+    }
+    catch (err) {
+        res.status(500).json({ success: false, error: { message: 'Server error' } });
+    }
+});
+router.get('/settings', settingsController_1.getSettings);
+router.patch('/settings', settingsController_1.updateSettings);
+router.get('/holidays', settingsController_1.getHolidays);
+router.post('/holidays', settingsController_1.addHoliday);
+router.delete('/holidays/:id', settingsController_1.deleteHoliday);
+router.get('/reports/attendance', adminReportController_1.getAttendanceReport);
+router.get('/attendance', adminController_1.getAttendance);
+router.get('/attendance/summary', adminController_1.getDailySummary);
+router.get('/leave/is-initialized', (req, res, next) => {
+    Promise.resolve().then(() => __importStar(require('../controllers/adminLeaveController'))).then(m => m.isInitialized(req, res)).catch(next);
+});
+router.post('/leave/initialize', (req, res, next) => {
+    Promise.resolve().then(() => __importStar(require('../controllers/adminLeaveController'))).then(m => m.initializeLeaves(req, res)).catch(next);
+});
+router.get('/leave', adminLeaveController_1.getAdminLeaves);
+router.patch('/leave/:id/approve', adminLeaveController_1.approveLeave);
+router.patch('/leave/:id/reject', adminLeaveController_1.rejectLeave);
+router.get('/employees', adminEmployeeController_1.getEmployees);
+router.get('/employees/:id', adminEmployeeController_1.getEmployeeDetail);
+router.post('/employees', adminEmployeeController_1.createEmployee);
+router.patch('/employees/:id', adminEmployeeController_1.editEmployee);
+router.patch('/employees/:id/status', adminEmployeeController_1.updateEmployeeStatus);
+router.patch('/employees/:id/reset-password', adminEmployeeController_1.resetPassword);
+router.delete('/employees/:id', adminEmployeeController_1.deleteEmployee);
+router.post('/upload-photo', upload_1.uploadProfilePhoto.single('photo'), adminEmployeeController_1.uploadEmployeePhoto);
+router.post('/employees/:id/photo', upload_1.uploadProfilePhoto.single('photo'), adminEmployeeController_1.uploadEmployeePhoto);
+router.delete('/employees/:id/photo', adminEmployeeController_1.deleteEmployeePhoto);
+exports.default = router;

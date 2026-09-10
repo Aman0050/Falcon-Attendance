@@ -1,0 +1,281 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.cancelLeave = exports.getLeaveRequest = exports.getLeaveHistory = exports.applyLeave = exports.getBalances = void 0;
+const zod_1 = require("zod");
+const db_1 = require("../db");
+const notificationService_1 = require("../services/notificationService");
+const applyLeaveSchema = zod_1.z.object({
+    startDate: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
+    endDate: zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Invalid date format (YYYY-MM-DD)'),
+    reason: zod_1.z.string().min(3).max(500),
+});
+const getBalances = async (req, res) => {
+    try {
+        const employeeId = req.user.id;
+        const year = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
+        const balanceRes = await (0, db_1.query)(`
+      SELECT accrued_leave, used_paid_leave, leave_without_pay, current_balance, last_credit_date
+      FROM leave_balances
+      WHERE employee_id = $1 AND year = $2
+    `, [employeeId, year]);
+        if (balanceRes.rows.length === 0) {
+            res.json({
+                success: true,
+                data: {
+                    accruedLeave: 0,
+                    usedPaidLeave: 0,
+                    leaveWithoutPay: 0,
+                    currentBalance: 0,
+                    lastCreditDate: null,
+                    eligible: false
+                }
+            });
+            return;
+        }
+        const b = balanceRes.rows[0];
+        res.json({
+            success: true,
+            data: {
+                accruedLeave: parseFloat(b.accrued_leave),
+                usedPaidLeave: parseFloat(b.used_paid_leave),
+                leaveWithoutPay: parseFloat(b.leave_without_pay),
+                currentBalance: parseFloat(b.current_balance),
+                lastCreditDate: b.last_credit_date,
+                eligible: true
+            }
+        });
+    }
+    catch (error) {
+        console.error('getBalances error:', error);
+        res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch leave balances' } });
+    }
+};
+exports.getBalances = getBalances;
+const applyLeave = async (req, res) => {
+    const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+    try {
+        const employeeId = req.user.id;
+        const parsed = applyLeaveSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
+            return;
+        }
+        const { startDate, endDate, reason } = parsed.data;
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        if (start > end) {
+            res.status(400).json({ success: false, error: { code: 'INVALID_DATE_RANGE', message: 'Start date must be before or equal to end date' } });
+            return;
+        }
+        const diffTime = Math.abs(end.getTime() - start.getTime());
+        const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        const overlapRes = await client.query(`
+      SELECT id FROM leave_requests
+      WHERE employee_id = $1 
+      AND status IN ('PENDING', 'APPROVED')
+      AND from_date <= $2 AND to_date >= $3
+    `, [employeeId, endDate, startDate]);
+        if (overlapRes.rows.length > 0) {
+            res.status(400).json({ success: false, error: { code: 'LEAVE_OVERLAP', message: 'You already have a leave request covering part of these dates.' } });
+            return;
+        }
+        const year = startDate.substring(0, 4);
+        await client.query('BEGIN');
+        const balanceRes = await client.query(`
+      SELECT current_balance FROM leave_balances 
+      WHERE employee_id = $1 AND year = $2 FOR UPDATE
+    `, [employeeId, year]);
+        let availableBalance = 0;
+        if (balanceRes.rows.length > 0) {
+            availableBalance = parseFloat(balanceRes.rows[0].current_balance);
+        }
+        const insertedIds = [];
+        if (availableBalance >= totalDays) {
+            // All paid leave
+            const insertRes = await client.query(`
+        INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+        VALUES ($1, $2, $3, $4, $5, 'Paid Leave', 'PENDING')
+        RETURNING id
+      `, [employeeId, startDate, endDate, totalDays, reason]);
+            insertedIds.push(insertRes.rows[0].id);
+        }
+        else {
+            // Split into Paid Leave and Leave Without Pay
+            let remainingDays = totalDays;
+            let currentStartDate = new Date(start);
+            if (availableBalance > 0) {
+                const paidLeaveDays = availableBalance;
+                const paidEndDate = new Date(currentStartDate);
+                paidEndDate.setDate(paidEndDate.getDate() + paidLeaveDays - 1);
+                const insertRes1 = await client.query(`
+          INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+          VALUES ($1, $2, $3, $4, $5, 'Paid Leave', 'PENDING')
+          RETURNING id
+        `, [
+                    employeeId,
+                    currentStartDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                    paidEndDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                    paidLeaveDays,
+                    reason
+                ]);
+                insertedIds.push(insertRes1.rows[0].id);
+                remainingDays -= paidLeaveDays;
+                currentStartDate = new Date(paidEndDate);
+                currentStartDate.setDate(currentStartDate.getDate() + 1);
+            }
+            if (remainingDays > 0) {
+                const insertRes2 = await client.query(`
+          INSERT INTO leave_requests (employee_id, from_date, to_date, days, reason, leave_type, status)
+          VALUES ($1, $2, $3, $4, $5, 'Leave Without Pay', 'PENDING')
+          RETURNING id
+        `, [
+                    employeeId,
+                    currentStartDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                    endDate,
+                    remainingDays,
+                    reason
+                ]);
+                insertedIds.push(insertRes2.rows[0].id);
+            }
+        }
+        await client.query('COMMIT');
+        // Trigger Smart Notifications
+        try {
+            await notificationService_1.NotificationService.notifyAdmins({
+                title: 'New Leave Request',
+                message: `${req.user.name || 'An employee'} applied for leave from ${startDate} to ${endDate}.`,
+                type: 'Leave',
+                priority: 'Medium',
+                actionUrl: '/leave',
+            });
+            await notificationService_1.NotificationService.notifyUser(employeeId, {
+                title: 'Leave Request Submitted',
+                message: `Your leave request for ${startDate} to ${endDate} has been submitted for approval.`,
+                type: 'Leave',
+                priority: 'Low',
+                actionUrl: '/my-leave',
+            });
+        }
+        catch (notifErr) {
+            console.warn('Leave apply notification error:', notifErr);
+        }
+        res.json({ success: true, data: { leaveIds: insertedIds, status: 'PENDING' } });
+    }
+    catch (error) {
+        const client = await require('pg').Pool.prototype.connect.bind(require('../db').pool)();
+        await client.query('ROLLBACK');
+        client.release();
+        console.error('applyLeave error:', error);
+        res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to apply for leave' } });
+    }
+};
+exports.applyLeave = applyLeave;
+const getLeaveHistory = async (req, res) => {
+    try {
+        const employeeId = req.user.id;
+        const page = parseInt(req.query.page) || 1;
+        let limit = parseInt(req.query.limit) || 20;
+        if (limit > 100)
+            limit = 100;
+        if (limit < 1)
+            limit = 1;
+        if (page < 1)
+            return res.status(400).json({ success: false, error: { code: 'INVALID_PAGE', message: 'Page must be >= 1' } });
+        const offset = (page - 1) * limit;
+        const statusFilter = req.query.status;
+        let filterQuery = `WHERE lr.employee_id = $1`;
+        let queryParams = [employeeId];
+        if (statusFilter && statusFilter !== 'ALL') {
+            queryParams.push(statusFilter.toUpperCase());
+            filterQuery += ` AND lr.status = $2`;
+        }
+        const countRes = await (0, db_1.query)(`SELECT COUNT(*) FROM leave_requests lr ${filterQuery}`, queryParams);
+        const total = parseInt(countRes.rows[0].count);
+        const histRes = await (0, db_1.query)(`
+      SELECT lr.id, lr.leave_type as "leaveType", lr.from_date, lr.to_date, lr.days as total_days, lr.reason, lr.status
+      FROM leave_requests lr
+      ${filterQuery}
+      ORDER BY lr.created_at DESC
+      LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}
+    `, [...queryParams, limit, offset]);
+        res.json({
+            success: true,
+            data: {
+                items: histRes.rows.map(rec => ({
+                    id: rec.id,
+                    leaveType: rec.leaveType,
+                    startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                    endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                    totalDays: parseFloat(rec.total_days),
+                    reason: rec.reason,
+                    status: rec.status
+                })),
+                pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+            }
+        });
+    }
+    catch (error) {
+        console.error('getLeaveHistory error:', error);
+        res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch leave history' } });
+    }
+};
+exports.getLeaveHistory = getLeaveHistory;
+const getLeaveRequest = async (req, res) => {
+    try {
+        const employeeId = req.user.id;
+        const id = parseInt(req.params.id);
+        const leaveRes = await (0, db_1.query)(`
+      SELECT lr.id, lr.leave_type as "leaveType", lr.from_date, lr.to_date, lr.days as total_days, lr.reason, lr.status,
+             lr.remarks as admin_comment, lr.approved_at as reviewed_at, lr.created_at
+      FROM leave_requests lr
+      WHERE lr.id = $1 AND lr.employee_id = $2
+    `, [id, employeeId]);
+        if (leaveRes.rows.length === 0) {
+            res.status(404).json({ success: false, error: { code: 'LEAVE_NOT_FOUND', message: 'Leave request not found.' } });
+            return;
+        }
+        const rec = leaveRes.rows[0];
+        res.json({
+            success: true,
+            data: {
+                id: rec.id,
+                leaveType: rec.leaveType,
+                startDate: new Date(rec.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                endDate: new Date(rec.to_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }),
+                totalDays: parseFloat(rec.total_days),
+                reason: rec.reason,
+                status: rec.status,
+                adminComment: rec.admin_comment,
+                reviewedAt: rec.reviewed_at,
+                createdAt: rec.created_at
+            }
+        });
+    }
+    catch (error) {
+        console.error('getLeaveRequest error:', error);
+        res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to fetch leave request' } });
+    }
+};
+exports.getLeaveRequest = getLeaveRequest;
+const cancelLeave = async (req, res) => {
+    try {
+        const employeeId = req.user.id;
+        const id = parseInt(req.params.id);
+        const existRes = await (0, db_1.query)(`SELECT status FROM leave_requests WHERE id = $1 AND employee_id = $2`, [id, employeeId]);
+        if (existRes.rows.length === 0) {
+            res.status(404).json({ success: false, error: { code: 'LEAVE_NOT_FOUND', message: 'Leave request not found.' } });
+            return;
+        }
+        if (existRes.rows[0].status !== 'PENDING') {
+            res.status(400).json({ success: false, error: { code: 'LEAVE_NOT_PENDING', message: 'Only pending requests can be cancelled.' } });
+            return;
+        }
+        await (0, db_1.query)(`UPDATE leave_requests SET status = 'CANCELLED', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]);
+        res.json({ success: true, message: 'Leave request cancelled successfully' });
+    }
+    catch (error) {
+        console.error('cancelLeave error:', error);
+        res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to cancel leave' } });
+    }
+};
+exports.cancelLeave = cancelLeave;

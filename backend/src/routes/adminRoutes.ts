@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { getAttendance, getDailySummary } from '../controllers/adminController';
 import { getAttendanceReport } from '../controllers/adminReportController';
 import { getAdminLeaves, approveLeave, rejectLeave } from '../controllers/adminLeaveController';
-import { getEmployees, getEmployeeDetail, createEmployee, editEmployee, updateEmployeeStatus, resetPassword, deleteEmployee } from '../controllers/adminEmployeeController';
+import { getEmployees, getEmployeeDetail, createEmployee, editEmployee, updateEmployeeStatus, resetPassword, deleteEmployee, uploadEmployeePhoto, deleteEmployeePhoto } from '../controllers/adminEmployeeController';
 import { getSettings, updateSettings, getHolidays, addHoliday, deleteHoliday } from '../controllers/settingsController';
 import { authenticateToken, requireRole } from '../middlewares/auth';
+import { uploadProfilePhoto } from '../middlewares/upload';
 import { query } from '../db';
 
 const router = Router();
@@ -54,5 +55,8 @@ router.patch('/employees/:id', editEmployee);
 router.patch('/employees/:id/status', updateEmployeeStatus);
 router.patch('/employees/:id/reset-password', resetPassword);
 router.delete('/employees/:id', deleteEmployee);
+router.post('/upload-photo', uploadProfilePhoto.single('photo'), uploadEmployeePhoto);
+router.post('/employees/:id/photo', uploadProfilePhoto.single('photo'), uploadEmployeePhoto);
+router.delete('/employees/:id/photo', deleteEmployeePhoto);
 
 export default router;

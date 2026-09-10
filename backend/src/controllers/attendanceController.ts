@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { query } from '../db';
 import { AuthRequest } from '../middlewares/auth';
 import { verifyLocation } from '../services/locationService';
+import { NotificationService } from '../services/notificationService';
+import { getAttendanceSettings, calculateStatus } from '../services/attendanceStatusService';
 
 const coordsSchema = z.object({
   latitude: z.number().min(-90).max(90),
@@ -63,14 +65,42 @@ export const checkIn = async (req: AuthRequest, res: Response): Promise<void> =>
 
     const newRecord = insertRes.rows[0];
 
-    // Notification
+    // Trigger Smart Notifications
     try {
-      await query(`
-        INSERT INTO notifications (employee_id, type, attendance_date, message)
-        VALUES ($1, 'CHECK_IN', $2, 'Attendance marked successfully.')
-      `, [employeeId, today]);
+      const settings = await getAttendanceSettings();
+      const timeStr = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata' });
+      const isLate = settings && settings.late_threshold && timeStr > settings.late_threshold;
+
+      if (isLate) {
+        await NotificationService.notifyUser(employeeId, {
+          title: 'Late Check-In',
+          message: `You marked attendance at ${timeStr}, which is past the late threshold (${settings.late_threshold}).`,
+          type: 'Attendance',
+          priority: 'High',
+          actionUrl: '/my-attendance',
+          attendanceDate: today,
+        });
+
+        await NotificationService.notifyAdmins({
+          title: 'Employee Checked In Late',
+          message: `${req.user!.name || 'An employee'} checked in late today at ${timeStr}.`,
+          type: 'Attendance',
+          priority: 'Medium',
+          actionUrl: '/attendance',
+          attendanceDate: today,
+        });
+      } else {
+        await NotificationService.notifyUser(employeeId, {
+          title: 'Check-In Confirmed',
+          message: `Your check-in was verified successfully at ${timeStr}.`,
+          type: 'Attendance',
+          priority: 'Low',
+          actionUrl: '/my-attendance',
+          attendanceDate: today,
+        });
+      }
     } catch (e: any) {
-      if (e.code !== '23505') console.error('Check-in notification error:', e);
+      console.error('Check-in notification error:', e);
     }
 
     res.json({
@@ -181,8 +211,6 @@ export const checkOut = async (req: AuthRequest, res: Response): Promise<void> =
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'An error occurred during check-out.' }});
   }
 };
-
-import { getAttendanceSettings, calculateStatus } from '../services/attendanceStatusService';
 
 export const getToday = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -416,7 +444,7 @@ export const getSummary = async (req: AuthRequest, res: Response): Promise<void>
           summary.totalWorkingDays++;
         }
 
-        if (result.isLate) summary.late++;
+        if (result.status === 'PRESENT' && result.isLate) summary.late++;
         summary.totalWorkingHours += (result.workingMinutes / 60);
 
         current.setDate(current.getDate() + 1);
