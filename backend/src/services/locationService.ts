@@ -8,6 +8,7 @@ export interface LocationValidationResult {
   allowedRadiusMeters: number;
   accuracyMeters: number;
   officeId: number;
+  officeName: string;
 }
 
 export const verifyLocation = async (
@@ -27,6 +28,7 @@ export const verifyLocation = async (
   const officeResult = await query(`
     SELECT 
       id, 
+      name,
       radius_meters,
       ST_Distance(location, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
     FROM offices 
@@ -51,6 +53,7 @@ export const verifyLocation = async (
     distanceMeters: Math.round(distanceMeters * 10) / 10,
     allowedRadiusMeters: office.radius_meters,
     accuracyMeters: Math.round(accuracy),
-    officeId: office.id
+    officeId: office.id,
+    officeName: office.name || 'Falcon Info Solutions HQ'
   };
 };

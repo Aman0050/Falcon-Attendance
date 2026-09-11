@@ -60,7 +60,7 @@ const getAttendance = async (req, res) => {
         FROM users u
         LEFT JOIN attendance att ON u.id = att.employee_id AND att.attendance_date = $1::date
         LEFT JOIN expanded_leaves el ON u.id = el.employee_id AND el.attendance_date = $1::date
-        WHERE u.role != 'admin' AND u.status = 'active'
+        WHERE u.status = 'active'
         ` : `
         SELECT a.attendance_date, a.employee_id, a.status as computed_status, a.check_in, a.check_out, a.working_minutes
         FROM attendance a
@@ -89,18 +89,27 @@ const getAttendance = async (req, res) => {
       ),
       combined AS (
         ${date ? `
-        SELECT NULL::integer as id, $1::date as attendance_date, u.id as employee_id,
+        SELECT att.id, $1::date as attendance_date, u.id as employee_id,
                COALESCE(att.status, CASE WHEN el.employee_id IS NOT NULL THEN 'ON LEAVE' ELSE 'ABSENT' END) as computed_status,
-               att.check_in, att.check_out, att.working_minutes
+               att.check_in, att.check_out, att.working_minutes,
+               ST_Y(att.check_in_location::geometry) as check_in_lat,
+               ST_X(att.check_in_location::geometry) as check_in_lng,
+               ST_Y(att.check_out_location::geometry) as check_out_lat,
+               ST_X(att.check_out_location::geometry) as check_out_lng
         FROM users u
         LEFT JOIN attendance att ON u.id = att.employee_id AND att.attendance_date = $1::date
         LEFT JOIN expanded_leaves el ON u.id = el.employee_id AND el.attendance_date = $1::date
-        WHERE u.role != 'admin' AND u.status = 'active'
+        WHERE u.status = 'active'
         ` : `
-        SELECT a.id, a.attendance_date, a.employee_id, a.status as computed_status, a.check_in, a.check_out, a.working_minutes
+        SELECT a.id, a.attendance_date, a.employee_id, a.status as computed_status, a.check_in, a.check_out, a.working_minutes,
+               ST_Y(a.check_in_location::geometry) as check_in_lat,
+               ST_X(a.check_in_location::geometry) as check_in_lng,
+               ST_Y(a.check_out_location::geometry) as check_out_lat,
+               ST_X(a.check_out_location::geometry) as check_out_lng
         FROM attendance a
         UNION ALL
-        SELECT NULL::integer as id, el.attendance_date, el.employee_id, 'ON LEAVE' as computed_status, NULL as check_in, NULL as check_out, 0 as working_minutes
+        SELECT NULL::integer as id, el.attendance_date, el.employee_id, 'ON LEAVE' as computed_status, NULL as check_in, NULL as check_out, 0 as working_minutes,
+               NULL::numeric as check_in_lat, NULL::numeric as check_in_lng, NULL::numeric as check_out_lat, NULL::numeric as check_out_lng
         FROM expanded_leaves el
         WHERE NOT EXISTS (
           SELECT 1 FROM attendance a 
@@ -109,6 +118,7 @@ const getAttendance = async (req, res) => {
         `}
       )
       SELECT a.id, a.attendance_date, a.check_in, a.check_out, a.working_minutes, a.computed_status as status,
+             a.check_in_lat, a.check_in_lng, a.check_out_lat, a.check_out_lng,
              u.name as employee_name, u.employee_id as employee_code, u.profile_photo_url as profile_photo_url
       FROM combined a
       JOIN users u ON a.employee_id = u.id
@@ -131,7 +141,11 @@ const getAttendance = async (req, res) => {
                         checkIn: isAbsentOrLeave ? null : rec.check_in,
                         checkOut: isAbsentOrLeave ? null : rec.check_out,
                         workingMinutes: isAbsentOrLeave ? 0 : (rec.working_minutes ? Math.round(rec.working_minutes) : 0),
-                        status: rec.status?.toUpperCase() || 'ABSENT'
+                        status: rec.status?.toUpperCase() || 'ABSENT',
+                        checkInLat: isAbsentOrLeave || !rec.check_in_lat ? null : parseFloat(rec.check_in_lat),
+                        checkInLng: isAbsentOrLeave || !rec.check_in_lng ? null : parseFloat(rec.check_in_lng),
+                        checkOutLat: isAbsentOrLeave || !rec.check_out_lat ? null : parseFloat(rec.check_out_lat),
+                        checkOutLng: isAbsentOrLeave || !rec.check_out_lng ? null : parseFloat(rec.check_out_lng),
                     };
                 }),
                 pagination: { page, limit, total, totalPages }
@@ -151,7 +165,7 @@ const getDailySummary = async (req, res) => {
             res.status(400).json({ success: false, error: { code: 'INVALID_DATE', message: 'Date parameter is required' } });
             return;
         }
-        const usersRes = await (0, db_1.query)(`SELECT COUNT(*) FROM users WHERE role != 'admin' AND status = 'active'`);
+        const usersRes = await (0, db_1.query)(`SELECT COUNT(*) FROM users WHERE status = 'active'`);
         const totalEmployees = parseInt(usersRes.rows[0].count);
         const attRes = await (0, db_1.query)(`
       SELECT 
@@ -167,7 +181,7 @@ const getDailySummary = async (req, res) => {
         JOIN generate_series(lr.from_date, lr.to_date, '1 day'::interval) d ON true
         WHERE lr.status = 'APPROVED'
       ) el ON u.id = el.employee_id AND el.attendance_date = $1
-      WHERE u.role != 'admin' AND u.status = 'active'
+      WHERE u.status = 'active'
     `, [date]);
         let present = 0;
         let absent = 0;

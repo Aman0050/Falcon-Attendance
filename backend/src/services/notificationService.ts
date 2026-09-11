@@ -248,10 +248,13 @@ export class NotificationService {
     messages: { token: string; title: string; body: string; data: any }[]
   ): Promise<void> {
     const validExpoMessages = messages
-      .filter((m) => m.token.startsWith('ExponentPushToken') || m.token.startsWith('ExpoPushToken'))
+      .filter((m) => m.token && (m.token.startsWith('ExponentPushToken') || m.token.startsWith('ExpoPushToken') || m.token.includes('[')))
       .map((m) => ({
         to: m.token,
         sound: 'default',
+        channelId: 'falcon-default',
+        priority: 'high',
+        badge: 1,
         title: m.title,
         body: m.body,
         data: m.data,
@@ -260,7 +263,7 @@ export class NotificationService {
     if (validExpoMessages.length === 0) return;
 
     try {
-      await fetch('https://exp.host/--/api/v2/push/send', {
+      const resp = await fetch('https://exp.host/--/api/v2/push/send', {
         method: 'POST',
         headers: {
           Accept: 'application/json',
@@ -269,6 +272,10 @@ export class NotificationService {
         },
         body: JSON.stringify(validExpoMessages),
       });
+      const result: any = await resp.json().catch(() => null);
+      if (result) {
+        console.log(`[Push Notification] Dispatched ${validExpoMessages.length} message(s). Status:`, result.data ? 'OK' : result);
+      }
     } catch (err) {
       console.warn('Expo push dispatch network error:', err);
     }

@@ -2,8 +2,20 @@ import { Router } from 'express';
 import { getAttendance, getDailySummary } from '../controllers/adminController';
 import { getAttendanceReport } from '../controllers/adminReportController';
 import { getAdminLeaves, approveLeave, rejectLeave } from '../controllers/adminLeaveController';
-import { getEmployees, getEmployeeDetail, createEmployee, editEmployee, updateEmployeeStatus, resetPassword, deleteEmployee, uploadEmployeePhoto, deleteEmployeePhoto } from '../controllers/adminEmployeeController';
-import { getSettings, updateSettings, getHolidays, addHoliday, deleteHoliday } from '../controllers/settingsController';
+import { 
+  getEmployees, 
+  getEmployeeDetail, 
+  createEmployee, 
+  editEmployee, 
+  updateEmployeeStatus, 
+  resetPassword, 
+  deleteEmployee, 
+  uploadEmployeePhoto, 
+  deleteEmployeePhoto,
+  updateJobStatus,
+  exportEmployees
+} from '../controllers/adminEmployeeController';
+import { getSettings, updateSettings, getHolidays, addHoliday, deleteHoliday, getOfficeSettings, updateOfficeSettings } from '../controllers/settingsController';
 import { authenticateToken, requireRole } from '../middlewares/auth';
 import { uploadProfilePhoto } from '../middlewares/upload';
 import { query } from '../db';
@@ -29,6 +41,8 @@ router.get('/notifications', async (req, res) => {
 
 router.get('/settings', getSettings);
 router.patch('/settings', updateSettings);
+router.get('/office', getOfficeSettings);
+router.patch('/office', updateOfficeSettings);
 router.get('/holidays', getHolidays);
 router.post('/holidays', addHoliday);
 router.delete('/holidays/:id', deleteHoliday);
@@ -80,9 +94,11 @@ router.patch('/leave/:id/approve', approveLeave);
 router.patch('/leave/:id/reject', rejectLeave);
 
 router.get('/employees', getEmployees);
+router.get('/employees/export', exportEmployees);
 router.get('/employees/:id', getEmployeeDetail);
 router.post('/employees', createEmployee);
 router.patch('/employees/:id', editEmployee);
+router.patch('/employees/:id/job-status', updateJobStatus);
 router.patch('/employees/:id/status', updateEmployeeStatus);
 router.patch('/employees/:id/reset-password', resetPassword);
 router.delete('/employees/:id', deleteEmployee);

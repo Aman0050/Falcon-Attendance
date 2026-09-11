@@ -10,7 +10,11 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
-  BellRing
+  BellRing,
+  MapPin,
+  Navigation,
+  ExternalLink,
+  Compass
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -19,8 +23,24 @@ export default function AdminSettings() {
 
   const [settings, setSettings] = useState<any>(null);
   const [holidays, setHolidays] = useState<any[]>([]);
+  const [officeSettings, setOfficeSettings] = useState<{
+    id?: number;
+    name: string;
+    latitude: number | string;
+    longitude: number | string;
+    radiusMeters: number | string;
+    status?: string;
+  }>({
+    name: 'Falcon Info Solutions HQ',
+    latitude: 28.623160,
+    longitude: 77.378843,
+    radiusMeters: 25,
+    status: 'active'
+  });
   const [loading, setLoading] = useState(true);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [officeSaveLoading, setOfficeSaveLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
@@ -30,12 +50,14 @@ export default function AdminSettings() {
 
   const loadData = async () => {
     try {
-      const [setRes, holRes] = await Promise.all([
+      const [setRes, holRes, offRes] = await Promise.all([
         fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/settings`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/holidays`, { headers: { Authorization: `Bearer ${token}` } })
+        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/holidays`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/office`, { headers: { Authorization: `Bearer ${token}` } })
       ]);
       const setJson = await setRes.json();
       const holJson = await holRes.json();
+      const offJson = await offRes.json();
 
       if (setJson.success) {
         setSettings({
@@ -49,6 +71,16 @@ export default function AdminSettings() {
         });
       }
       if (holJson.success) setHolidays(holJson.data);
+      if (offJson.success && offJson.data) {
+        setOfficeSettings({
+          id: offJson.data.id,
+          name: offJson.data.name,
+          latitude: offJson.data.latitude,
+          longitude: offJson.data.longitude,
+          radiusMeters: offJson.data.radiusMeters,
+          status: offJson.data.status
+        });
+      }
     } catch (e: any) {
       setError('Failed to load settings');
     } finally {
@@ -82,6 +114,69 @@ export default function AdminSettings() {
     } finally {
       setSaveLoading(false);
     }
+  };
+
+  const handleSaveOffice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOfficeSaveLoading(true);
+    setError('');
+    setMsg('');
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/admin/office`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: officeSettings.name,
+          latitude: Number(officeSettings.latitude),
+          longitude: Number(officeSettings.longitude),
+          radiusMeters: Number(officeSettings.radiusMeters)
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMsg('Office location and 25-metre geo-fence radius updated successfully.');
+        if (data.data) {
+          setOfficeSettings({
+            id: data.data.id,
+            name: data.data.name,
+            latitude: data.data.latitude,
+            longitude: data.data.longitude,
+            radiusMeters: data.data.radiusMeters,
+            status: data.data.status
+          });
+        }
+      } else {
+        setError(data.error?.message || data.error || 'Failed to update office location');
+      }
+    } catch (e) {
+      setError('Network error saving office settings');
+    } finally {
+      setOfficeSaveLoading(false);
+    }
+  };
+
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setOfficeSettings(prev => ({
+          ...prev,
+          latitude: Math.round(pos.coords.latitude * 1000000) / 1000000,
+          longitude: Math.round(pos.coords.longitude * 1000000) / 1000000
+        }));
+        setLocating(false);
+        setMsg(`Current browser coordinates detected (±${Math.round(pos.coords.accuracy)}m accuracy).`);
+      },
+      (err) => {
+        setLocating(false);
+        alert('Could not retrieve current location: ' + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleAddHoliday = async (e: React.FormEvent) => {
@@ -156,6 +251,166 @@ export default function AdminSettings() {
           <span>{msg}</span>
         </Alert>
       )}
+
+      {/* Office Location & Geo-Fence Radius Card */}
+      <div className="card p-4 border-0 mb-4" style={{ boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.03)', borderRadius: '20px' }}>
+        <div className="d-flex flex-column flex-md-row align-items-md-center justify-content-between pb-3 mb-4 border-bottom gap-2" style={{ borderColor: '#F1F5F9' }}>
+          <div className="d-flex align-items-center gap-2.5">
+            <div
+              style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
+                background: '#EFF6FF',
+                color: '#2563EB',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #DBEAFE',
+              }}
+            >
+              <MapPin size={18} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '16.5px', fontWeight: 600, color: '#0F172A', margin: 0 }}>
+                Attendance Geo-Fence & Office Coordinates
+              </h3>
+              <p className="text-muted mb-0" style={{ fontSize: '13px' }}>
+                Set the physical office GPS coordinates and configured perimeter radius for mobile Check-In/Check-Out
+              </p>
+            </div>
+          </div>
+
+          <div className="d-flex align-items-center gap-2">
+            <span className="badge px-3 py-2" style={{ backgroundColor: '#DCFCE7', color: '#15803D', fontSize: '12px', fontWeight: 600, borderRadius: '8px' }}>
+              ✓ {officeSettings.radiusMeters}m Radius Enforced
+            </span>
+          </div>
+        </div>
+
+        <div className="p-3 mb-4 rounded-3 d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+          <div className="d-flex align-items-center gap-2">
+            <ShieldCheck size={18} className="text-primary flex-shrink-0" />
+            <span style={{ fontSize: '13px', color: '#334155' }}>
+              <strong>Strict Geo-Fence:</strong> Employees can only mark Check-In and Check-Out when physically within <strong>{officeSettings.radiusMeters} metres</strong> of this location. Attempts outside this radius are automatically blocked.
+            </span>
+          </div>
+          <div className="d-flex align-items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-primary d-flex align-items-center gap-1.5"
+              onClick={handleDetectLocation}
+              disabled={locating}
+              style={{ borderRadius: '8px', fontSize: '12.5px', fontWeight: 500 }}
+            >
+              {locating ? <Spinner size="sm" animation="border" /> : <Compass size={14} />}
+              <span>{locating ? 'Detecting GPS...' : 'Detect Current Location'}</span>
+            </button>
+            <a
+              href={`https://www.google.com/maps?q=${officeSettings.latitude},${officeSettings.longitude}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1.5"
+              style={{ borderRadius: '8px', fontSize: '12.5px', fontWeight: 500 }}
+            >
+              <ExternalLink size={14} />
+              <span>Preview on Maps</span>
+            </a>
+          </div>
+        </div>
+
+        <Form onSubmit={handleSaveOffice}>
+          <Row className="g-3 mb-3">
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label className="fw-medium text-dark" style={{ fontSize: '13.5px' }}>Office / Headquarters Name</Form.Label>
+                <Form.Control
+                  type="text"
+                  value={officeSettings.name}
+                  onChange={(e) => setOfficeSettings({ ...officeSettings, name: e.target.value })}
+                  placeholder="e.g. Falcon Info Solutions HQ"
+                  style={{ height: '44px', borderRadius: '10px', fontSize: '14px' }}
+                  required
+                />
+                <span className="text-muted mt-1 d-block" style={{ fontSize: '12px' }}>Assigned facility name displayed to employees</span>
+              </Form.Group>
+            </Col>
+
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label className="fw-medium text-dark" style={{ fontSize: '13.5px' }}>
+                  Geo-Fence Radius (Metres)
+                </Form.Label>
+                <Form.Control
+                  type="number"
+                  min={5}
+                  max={500}
+                  value={officeSettings.radiusMeters}
+                  onChange={(e) => setOfficeSettings({ ...officeSettings, radiusMeters: Number(e.target.value) })}
+                  style={{ height: '44px', borderRadius: '10px', fontSize: '14px', fontWeight: 600 }}
+                  required
+                />
+                <span className="text-muted mt-1 d-block" style={{ fontSize: '12px' }}>
+                  Required: <strong>25 metres</strong> (physical presence perimeter)
+                </span>
+              </Form.Group>
+            </Col>
+
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label className="fw-medium text-dark" style={{ fontSize: '13.5px' }}>Latitude (Decimal Degrees)</Form.Label>
+                <Form.Control
+                  type="number"
+                  step="any"
+                  value={officeSettings.latitude}
+                  onChange={(e) => setOfficeSettings({ ...officeSettings, latitude: e.target.value })}
+                  placeholder="e.g. 28.623160"
+                  style={{ height: '44px', borderRadius: '10px', fontSize: '14px' }}
+                  required
+                />
+                <span className="text-muted mt-1 d-block" style={{ fontSize: '12px' }}>GPS Latitude coordinate</span>
+              </Form.Group>
+            </Col>
+
+            <Col md={6}>
+              <Form.Group>
+                <Form.Label className="fw-medium text-dark" style={{ fontSize: '13.5px' }}>Longitude (Decimal Degrees)</Form.Label>
+                <Form.Control
+                  type="number"
+                  step="any"
+                  value={officeSettings.longitude}
+                  onChange={(e) => setOfficeSettings({ ...officeSettings, longitude: e.target.value })}
+                  placeholder="e.g. 77.378843"
+                  style={{ height: '44px', borderRadius: '10px', fontSize: '14px' }}
+                  required
+                />
+                <span className="text-muted mt-1 d-block" style={{ fontSize: '12px' }}>GPS Longitude coordinate</span>
+              </Form.Group>
+            </Col>
+          </Row>
+
+          <div className="pt-2 d-flex justify-content-end">
+            <button
+              className="btn btn-primary px-4"
+              type="submit"
+              disabled={officeSaveLoading}
+              style={{ height: '44px', borderRadius: '10px', fontWeight: 600 }}
+            >
+              {officeSaveLoading ? (
+                <>
+                  <Spinner size="sm" animation="border" className="me-2" />
+                  <span>Saving Office Coordinates...</span>
+                </>
+              ) : (
+                <>
+                  <Save size={16} className="me-2" />
+                  <span>Save Office & Geo-Fence Radius</span>
+                </>
+              )}
+            </button>
+          </div>
+        </Form>
+      </div>
 
       <Row className="g-4">
         {/* Attendance Rules Form Card */}

@@ -20,7 +20,7 @@ const authenticateToken = (req, res, next) => {
             return;
         }
         try {
-            const userRes = await (0, db_1.query)(`SELECT id, employee_id, role, status, name FROM users WHERE id = $1`, [decoded.id]);
+            const userRes = await (0, db_1.query)(`SELECT id, employee_id, role, roles, status, name FROM users WHERE id = $1`, [decoded.id]);
             if (userRes.rows.length === 0) {
                 res.status(401).json({ error: 'User not found' });
                 return;
@@ -30,11 +30,16 @@ const authenticateToken = (req, res, next) => {
                 res.status(401).json({ error: 'Account is deactivated' });
                 return;
             }
+            const rawRoles = dbUser.roles;
+            const roles = Array.isArray(rawRoles)
+                ? rawRoles.map((r) => String(r).toLowerCase())
+                : [String(dbUser.role || 'employee').toLowerCase()];
             // Attach authoritative DB identity
             req.user = {
                 id: dbUser.id,
                 employee_id: dbUser.employee_id,
                 role: dbUser.role,
+                roles,
                 name: dbUser.name
             };
             next();
@@ -53,7 +58,9 @@ const requireRole = (role) => {
             res.status(401).json({ error: 'User not authenticated' });
             return;
         }
-        if (req.user.role.toLowerCase() !== role.toLowerCase()) {
+        const userRoles = req.user.roles || [req.user.role];
+        const hasPermission = userRoles.some(r => r.toLowerCase() === role.toLowerCase());
+        if (!hasPermission) {
             res.status(403).json({ error: 'Forbidden: Insufficient role permissions' });
             return;
         }
@@ -68,8 +75,9 @@ const shared = (req, res, next) => {
         res.status(401).json({ error: 'User not authenticated' });
         return;
     }
-    const role = req.user.role.toLowerCase();
-    if (role !== 'admin' && role !== 'employee') {
+    const userRoles = req.user.roles || [req.user.role];
+    const hasPermission = userRoles.some(r => r.toLowerCase() === 'admin' || r.toLowerCase() === 'employee');
+    if (!hasPermission) {
         res.status(403).json({ error: 'Forbidden: Insufficient role permissions' });
         return;
     }

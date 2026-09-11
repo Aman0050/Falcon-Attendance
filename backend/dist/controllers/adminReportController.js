@@ -8,8 +8,7 @@ const db_1 = require("../db");
 const attendanceStatusService_1 = require("../services/attendanceStatusService");
 const exceljs_1 = __importDefault(require("exceljs"));
 const pdfkit_1 = __importDefault(require("pdfkit"));
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
+const logoHelper_1 = require("../utils/logoHelper");
 const getAttendanceReport = async (req, res) => {
     try {
         const { from, to, month, year, employeeId, status, search, export: exportType } = req.query;
@@ -311,29 +310,21 @@ async function exportExcel(res, summary, employeeReports, from, to) {
     sheet.getRow(3).height = 20;
     sheet.getRow(4).height = 18;
     sheet.getRow(5).height = 14;
-    // Attempt to add logo cleanly in Column A without overlapping any text
-    const possibleLogoPaths = [
-        path_1.default.join(process.cwd(), '../mobile/assets/logo.png'),
-        path_1.default.join(process.cwd(), '../admin/public/logo.png'),
-        path_1.default.join(process.cwd(), 'assets/logo.png'),
-        path_1.default.join(process.cwd(), 'public/logo.png')
-    ];
-    for (const lp of possibleLogoPaths) {
-        if (fs_1.default.existsSync(lp)) {
-            try {
-                const logoId = workbook.addImage({
-                    buffer: fs_1.default.readFileSync(lp),
-                    extension: 'png'
-                });
-                sheet.addImage(logoId, {
-                    tl: { col: 0.15, row: 1.1 },
-                    ext: { width: 56, height: 56 }
-                });
-                break;
-            }
-            catch (e) {
-                console.error('Logo add error', e);
-            }
+    // Add company logo cleanly in Column A without overlapping any text
+    const logoBuffer = (0, logoHelper_1.getCompanyLogoBuffer)();
+    if (logoBuffer) {
+        try {
+            const logoId = workbook.addImage({
+                buffer: logoBuffer,
+                extension: 'png'
+            });
+            sheet.addImage(logoId, {
+                tl: { col: 0.15, row: 1.1 },
+                ext: { width: 56, height: 56 }
+            });
+        }
+        catch (e) {
+            console.error('Logo add error in exportExcel:', e);
         }
     }
     sheet.mergeCells('B2:I2');
@@ -512,21 +503,15 @@ async function exportPdf(res, summary, employeeReports, from, to) {
         // Top navy accent line
         doc.rect(0, 0, pageWidth, 5).fill('#1E3A8A');
         // Company logo
-        const possibleLogoPaths = [
-            path_1.default.join(process.cwd(), '../mobile/assets/logo.png'),
-            path_1.default.join(process.cwd(), '../admin/public/logo.png'),
-            path_1.default.join(process.cwd(), 'assets/logo.png'),
-            path_1.default.join(process.cwd(), 'public/logo.png')
-        ];
+        const logoPath = (0, logoHelper_1.getCompanyLogoPath)();
         let logoX = 36;
-        for (const lp of possibleLogoPaths) {
-            if (fs_1.default.existsSync(lp)) {
-                try {
-                    doc.image(lp, 36, 20, { width: 44, height: 44 });
-                    logoX = 88;
-                    break;
-                }
-                catch (e) { }
+        if (logoPath) {
+            try {
+                doc.image(logoPath, 36, 18, { width: 44, height: 44 });
+                logoX = 88;
+            }
+            catch (e) {
+                console.error('Logo add error in exportPdf:', e);
             }
         }
         // Title & Subtitle

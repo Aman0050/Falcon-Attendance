@@ -21,6 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function HistoryScreen() {
   const { user, token } = useAuth();
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
+  const [adminTab, setAdminTab] = useState<'my' | 'all'>('my');
   const [currentDate, setCurrentDate] = useState(new Date());
 
   // Employee states
@@ -47,7 +49,7 @@ export default function HistoryScreen() {
       const month = currentDate.getMonth() + 1;
       const dateStr = currentDate.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 
-      if (user?.role?.toLowerCase() === 'admin') {
+      if (isAdmin && adminTab === 'all') {
         const records = await getAdminAttendance(dateStr);
         setAdminRecords(records.items || []);
       } else {
@@ -71,7 +73,7 @@ export default function HistoryScreen() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [currentDate, token])
+    }, [currentDate, token, adminTab])
   );
 
   const handlePrevMonth = () => {
@@ -135,86 +137,84 @@ export default function HistoryScreen() {
     }
   };
 
-  if (user?.role?.toLowerCase() === 'admin') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.monthHeader}>
-          <TouchableOpacity
-            onPress={() => {
-              const d = new Date(currentDate);
-              d.setDate(d.getDate() - 1);
-              setCurrentDate(d);
-            }}
-            style={styles.navButton}
-          >
-            <Ionicons name="chevron-back" size={20} color="#334155" />
-          </TouchableOpacity>
-          <Text style={styles.monthTitle}>
-            {currentDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </Text>
-          <TouchableOpacity
-            onPress={() => {
-              const d = new Date(currentDate);
-              d.setDate(d.getDate() + 1);
-              setCurrentDate(d);
-            }}
-            style={styles.navButton}
-          >
-            <Ionicons name="chevron-forward" size={20} color="#334155" />
+  const renderAdminAllStaff = () => (
+    <>
+      <View style={styles.monthHeader}>
+        <TouchableOpacity
+          onPress={() => {
+            const d = new Date(currentDate);
+            d.setDate(d.getDate() - 1);
+            setCurrentDate(d);
+          }}
+          style={styles.navButton}
+        >
+          <Ionicons name="chevron-back" size={20} color="#334155" />
+        </TouchableOpacity>
+        <Text style={styles.monthTitle}>
+          {currentDate.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}
+        </Text>
+        <TouchableOpacity
+          onPress={() => {
+            const d = new Date(currentDate);
+            d.setDate(d.getDate() + 1);
+            setCurrentDate(d);
+          }}
+          style={styles.navButton}
+        >
+          <Ionicons name="chevron-forward" size={20} color="#334155" />
+        </TouchableOpacity>
+      </View>
+
+      {loading && !refreshing ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color="#2563EB" />
+        </View>
+      ) : error ? (
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => loadData()}>
+            <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
-
-        {loading && !refreshing ? (
-          <View style={styles.centerContainer}>
-            <ActivityIndicator size="large" color="#2563EB" />
-          </View>
-        ) : error ? (
-          <View style={styles.centerContainer}>
-            <Text style={styles.errorText}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => loadData()}>
-              <Text style={styles.retryText}>Retry</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <FlatList
-            data={adminRecords}
-            keyExtractor={item => item.employeeId + item.date}
-            contentContainerStyle={{ padding: 16 }}
-            refreshControl={
-              <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)} colors={['#2563EB']} />
-            }
-            renderItem={({ item }) => {
-              const st = getStatusDetails(item.status);
-              return (
-                <View style={[styles.adminCard, { borderLeftColor: st.color }]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.adminEmpName}>{item.employeeName}</Text>
-                    <Text style={styles.adminEmpId}>ID: {item.employeeId}</Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <View style={[styles.statusBadge, { backgroundColor: st.bg }]}>
-                      <Text style={[styles.statusBadgeText, { color: st.color }]}>{st.label}</Text>
-                    </View>
-                    {(item.checkIn || item.checkOut) && (
-                      <Text style={styles.adminTimeText}>
-                        {formatTime(item.checkIn)} - {formatTime(item.checkOut)}
-                      </Text>
-                    )}
-                  </View>
+      ) : (
+        <FlatList
+          data={adminRecords}
+          keyExtractor={item => item.employeeId + item.date}
+          contentContainerStyle={{ padding: 16 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)} colors={['#2563EB']} />
+          }
+          renderItem={({ item }) => {
+            const st = getStatusDetails(item.status);
+            return (
+              <View style={[styles.adminCard, { borderLeftColor: st.color }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.adminEmpName}>{item.employeeName}</Text>
+                  <Text style={styles.adminEmpId}>ID: {item.employeeId}</Text>
                 </View>
-              );
-            }}
-            ListEmptyComponent={
-              <View style={styles.centerContainer}>
-                <Ionicons name="documents-outline" size={44} color="#94A3B8" />
-                <Text style={styles.emptyText}>No records for this date</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <View style={[styles.statusBadge, { backgroundColor: st.bg }]}>
+                    <Text style={[styles.statusBadgeText, { color: st.color }]}>{st.label}</Text>
+                  </View>
+                  {(item.checkIn || item.checkOut) && (
+                    <Text style={styles.adminTimeText}>
+                      {formatTime(item.checkIn)} - {formatTime(item.checkOut)}
+                    </Text>
+                  )}
+                </View>
               </View>
-            }
-          />
-        )}
-      </SafeAreaView>
-    );
-  }
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.centerContainer}>
+              <Ionicons name="documents-outline" size={44} color="#94A3B8" />
+              <Text style={styles.emptyText}>No records for this date</Text>
+            </View>
+          }
+        />
+      )}
+    </>
+  );
 
   const renderGrid = () => {
     if (calendar.length === 0) return null;
@@ -320,93 +320,125 @@ export default function HistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Month Selector Bar */}
-      <View style={styles.monthHeader}>
-        <TouchableOpacity onPress={handlePrevMonth} style={styles.navButton} activeOpacity={0.7}>
-          <Ionicons name="chevron-back" size={20} color="#334155" />
-        </TouchableOpacity>
-        <Text style={styles.monthTitle}>
-          {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-        </Text>
-        <TouchableOpacity onPress={handleNextMonth} style={styles.navButton} activeOpacity={0.7}>
-          <Ionicons name="chevron-forward" size={20} color="#334155" />
-        </TouchableOpacity>
-      </View>
-
-      {loading && !refreshing ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color="#2563EB" />
-          <Text style={styles.loadingText}>Loading attendance record...</Text>
-        </View>
-      ) : error ? (
-        <View style={styles.centerContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => loadData()}>
-            <Text style={styles.retryText}>Retry</Text>
+      {/* Admin Toggle between My Attendance and All Staff */}
+      {isAdmin && (
+        <View style={styles.segmentContainer}>
+          <TouchableOpacity
+            style={[styles.segmentBtn, adminTab === 'my' && styles.segmentBtnActive]}
+            onPress={() => setAdminTab('my')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="person" size={14} color={adminTab === 'my' ? '#2563EB' : '#64748B'} style={{ marginRight: 6 }} />
+            <Text style={[styles.segmentBtnText, adminTab === 'my' && styles.segmentBtnTextActive]}>
+              My Attendance
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.segmentBtn, adminTab === 'all' && styles.segmentBtnActive]}
+            onPress={() => setAdminTab('all')}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="people" size={14} color={adminTab === 'all' ? '#2563EB' : '#64748B'} style={{ marginRight: 6 }} />
+            <Text style={[styles.segmentBtnText, adminTab === 'all' && styles.segmentBtnTextActive]}>
+              All Staff Records
+            </Text>
           </TouchableOpacity>
         </View>
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)} colors={['#2563EB']} />
-          }
-        >
-          {/* Executive Overview Card */}
-          {summary && (
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryTopRow}>
-                <View style={styles.heroStatBox}>
-                  <Text style={styles.heroStatNumber}>{summary.attendancePercentage}%</Text>
-                  <Text style={styles.heroStatLabel}>Monthly Rate</Text>
-                </View>
-                <View style={styles.heroStatDivider} />
-                <View style={styles.heroStatBox}>
-                  <Text style={styles.heroStatNumber}>{formatHours(summary.totalWorkingHours * 60)}</Text>
-                  <Text style={styles.heroStatLabel}>Total Hours</Text>
-                </View>
-              </View>
-
-              <View style={styles.chipsRow}>
-                <View style={[styles.statChip, { backgroundColor: '#DCFCE7' }]}>
-                  <Text style={[styles.chipVal, { color: '#15803D' }]}>{summary.present}</Text>
-                  <Text style={[styles.chipLabel, { color: '#166534' }]}>Present</Text>
-                </View>
-
-                <View style={[styles.statChip, { backgroundColor: '#FEE2E2' }]}>
-                  <Text style={[styles.chipVal, { color: '#B91C1C' }]}>{summary.absent}</Text>
-                  <Text style={[styles.chipLabel, { color: '#991B1B' }]}>Absent</Text>
-                </View>
-
-                <View style={[styles.statChip, { backgroundColor: '#FEF3C7' }]}>
-                  <Text style={[styles.chipVal, { color: '#B45309' }]}>{summary.halfDays}</Text>
-                  <Text style={[styles.chipLabel, { color: '#92400E' }]}>Half Day</Text>
-                </View>
-
-                <View style={[styles.statChip, { backgroundColor: '#DBEAFE' }]}>
-                  <Text style={[styles.chipVal, { color: '#1D4ED8' }]}>{summary.onLeave}</Text>
-                  <Text style={[styles.chipLabel, { color: '#1E40AF' }]}>Leave</Text>
-                </View>
-
-                <View style={[styles.statChip, { backgroundColor: '#F1F5F9' }]}>
-                  <Text style={[styles.chipVal, { color: '#475569' }]}>{summary.late}</Text>
-                  <Text style={[styles.chipLabel, { color: '#475569' }]}>Late</Text>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Calendar Card */}
-          <View style={styles.calendarCard}>
-            <Text style={styles.calendarTitle}>Daily Breakdown</Text>
-            {renderGrid()}
-          </View>
-
-          <View style={{ height: 30 }} />
-        </ScrollView>
       )}
 
-      {renderModal()}
+      {isAdmin && adminTab === 'all' ? (
+        renderAdminAllStaff()
+      ) : (
+        <>
+          {/* Month Selector Bar */}
+          <View style={styles.monthHeader}>
+            <TouchableOpacity onPress={handlePrevMonth} style={styles.navButton} activeOpacity={0.7}>
+              <Ionicons name="chevron-back" size={20} color="#334155" />
+            </TouchableOpacity>
+            <Text style={styles.monthTitle}>
+              {currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </Text>
+            <TouchableOpacity onPress={handleNextMonth} style={styles.navButton} activeOpacity={0.7}>
+              <Ionicons name="chevron-forward" size={20} color="#334155" />
+            </TouchableOpacity>
+          </View>
+
+          {loading && !refreshing ? (
+            <View style={styles.centerContainer}>
+              <ActivityIndicator size="large" color="#2563EB" />
+              <Text style={styles.loadingText}>Loading attendance record...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.centerContainer}>
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={() => loadData()}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => loadData(true)} colors={['#2563EB']} />
+              }
+            >
+              {/* Executive Overview Card */}
+              {summary && (
+                <View style={styles.summaryCard}>
+                  <View style={styles.summaryTopRow}>
+                    <View style={styles.heroStatBox}>
+                      <Text style={styles.heroStatNumber}>{summary.attendancePercentage}%</Text>
+                      <Text style={styles.heroStatLabel}>Monthly Rate</Text>
+                    </View>
+                    <View style={styles.heroStatDivider} />
+                    <View style={styles.heroStatBox}>
+                      <Text style={styles.heroStatNumber}>{formatHours(summary.totalWorkingHours * 60)}</Text>
+                      <Text style={styles.heroStatLabel}>Total Hours</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.chipsRow}>
+                    <View style={[styles.statChip, { backgroundColor: '#DCFCE7' }]}>
+                      <Text style={[styles.chipVal, { color: '#15803D' }]}>{summary.present}</Text>
+                      <Text style={[styles.chipLabel, { color: '#166534' }]}>Present</Text>
+                    </View>
+
+                    <View style={[styles.statChip, { backgroundColor: '#FEE2E2' }]}>
+                      <Text style={[styles.chipVal, { color: '#B91C1C' }]}>{summary.absent}</Text>
+                      <Text style={[styles.chipLabel, { color: '#991B1B' }]}>Absent</Text>
+                    </View>
+
+                    <View style={[styles.statChip, { backgroundColor: '#FEF3C7' }]}>
+                      <Text style={[styles.chipVal, { color: '#B45309' }]}>{summary.halfDays}</Text>
+                      <Text style={[styles.chipLabel, { color: '#92400E' }]}>Half Day</Text>
+                    </View>
+
+                    <View style={[styles.statChip, { backgroundColor: '#DBEAFE' }]}>
+                      <Text style={[styles.chipVal, { color: '#1D4ED8' }]}>{summary.onLeave}</Text>
+                      <Text style={[styles.chipLabel, { color: '#1E40AF' }]}>Leave</Text>
+                    </View>
+
+                    <View style={[styles.statChip, { backgroundColor: '#F1F5F9' }]}>
+                      <Text style={[styles.chipVal, { color: '#475569' }]}>{summary.late}</Text>
+                      <Text style={[styles.chipLabel, { color: '#475569' }]}>Late</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Calendar Card */}
+              <View style={styles.calendarCard}>
+                <Text style={styles.calendarTitle}>Daily Breakdown</Text>
+                {renderGrid()}
+              </View>
+
+              <View style={{ height: 30 }} />
+            </ScrollView>
+          )}
+
+          {renderModal()}
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -416,6 +448,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
     paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 20) : 0,
+  },
+  segmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 12,
+    padding: 4,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  segmentBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 9,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  segmentBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  segmentBtnTextActive: {
+    color: '#2563EB',
+    fontWeight: '700',
   },
   monthHeader: {
     flexDirection: 'row',

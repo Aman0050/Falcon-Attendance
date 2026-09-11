@@ -8,6 +8,7 @@ const pdfkit_1 = __importDefault(require("pdfkit"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const db_1 = require("../db");
+const logoHelper_1 = require("../utils/logoHelper");
 function numberToIndianWords(num) {
     if (num === 0)
         return 'Zero Rupees';
@@ -77,8 +78,8 @@ class SalarySlipService {
         const monthShort = monthShortNames[month - 1];
         const lastDayOfMonth = new Date(year, month, 0).getDate();
         const payPeriod = `01-${monthShort}-${String(year).slice(-2)} to ${lastDayOfMonth}-${monthShort}-${String(year).slice(-2)}`;
-        const logoPath = path_1.default.join(process.cwd(), 'assets', 'falcon_logo.png');
-        const hasLogo = fs_1.default.existsSync(logoPath);
+        const logoPath = (0, logoHelper_1.getCompanyLogoPath)();
+        const hasLogo = !!(logoPath && fs_1.default.existsSync(logoPath));
         await new Promise((resolve, reject) => {
             const doc = new pdfkit_1.default({ margin: 36, size: 'A4' });
             const stream = fs_1.default.createWriteStream(filePath);
@@ -303,46 +304,15 @@ class SalarySlipService {
                 .text(`In Words: ${netInWords}`, leftMargin + 12, y + 24, { width: 330 });
             doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold')
                 .text(`INR ${item.net_salary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, leftMargin + 320, y + 12, { width: 190, align: 'right' });
-            y += netSalaryH + 8;
-            // ==================== 6. TRIPLE SUMMARY CARDS ====================
-            const cardW = 169;
-            const cardH = 34;
-            // Card 1: Total Gross Earnings
-            doc.rect(leftMargin, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-            doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-                .text('TOTAL GROSS EARNINGS', leftMargin + 8, y + 6);
-            doc.fillColor(cPrimaryNavy).fontSize(10).font('Helvetica-Bold')
-                .text(`INR ${item.gross_pay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, leftMargin + 8, y + 18);
-            // Card 2: Total Deductions
-            const card2X = leftMargin + cardW + 8;
-            doc.rect(card2X, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-            doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-                .text('TOTAL DEDUCTIONS', card2X + 8, y + 6);
-            doc.fillColor('#DC2626').fontSize(10).font('Helvetica-Bold')
-                .text(`INR ${item.total_deductions.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, card2X + 8, y + 18);
-            // Card 3: Total CTC Monthly
-            const card3X = card2X + cardW + 8;
-            const totalMonthlyCTC = item.base_monthly_salary || (item.gross_pay + totalCTCContrib);
-            doc.rect(card3X, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-            doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-                .text('TOTAL CTC (MONTHLY)', card3X + 8, y + 6);
-            doc.fillColor(cPrimaryNavy).fontSize(10).font('Helvetica-Bold')
-                .text(`INR ${totalMonthlyCTC.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, card3X + 8, y + 18);
-            y += cardH + 16;
-            // ==================== 7. SIGNATURES ====================
+            y += netSalaryH + 24;
+            // ==================== 6. SIGNATURE ====================
             const sigLineW = 180;
-            // Employee Signature
-            doc.moveTo(leftMargin + 10, y + 26).lineTo(leftMargin + 10 + sigLineW, y + 26).stroke(cTextMuted);
-            doc.fillColor(cTextDark).fontSize(8).font('Helvetica-Bold')
-                .text('Employee Signature', leftMargin + 10, y + 30, { width: sigLineW, align: 'center' });
             // Authorized Signatory
             const authSigX = leftMargin + contentWidth - sigLineW - 10;
-            doc.moveTo(authSigX, y + 26).lineTo(authSigX + sigLineW, y + 26).stroke(cTextMuted);
+            doc.moveTo(authSigX, y + 30).lineTo(authSigX + sigLineW, y + 30).stroke(cTextMuted);
             doc.fillColor(cTextDark).fontSize(8).font('Helvetica-Bold')
-                .text('For Falcon Info Solutions Pvt. Ltd.', authSigX, y + 6, { width: sigLineW, align: 'center' });
-            doc.fillColor(cTextMuted).fontSize(7.5).font('Helvetica')
-                .text('Authorized Signatory', authSigX, y + 30, { width: sigLineW, align: 'center' });
-            y += 50;
+                .text('Authorized Signatory', authSigX, y + 34, { width: sigLineW, align: 'center' });
+            y += 58;
             // ==================== 8. CONFIDENTIALITY NOTE ====================
             doc.rect(leftMargin, y, contentWidth, 32).fill(cBgLightBlue).stroke(cBorderBlue);
             doc.fillColor(cTextMuted).fontSize(6.5).font('Helvetica')

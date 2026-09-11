@@ -11,7 +11,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
-  Calendar
+  Calendar,
+  MapPin,
+  ExternalLink
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import Avatar from '../components/common/Avatar';
@@ -280,6 +282,7 @@ export default function AdminAttendance() {
                     <th>Check-out</th>
                     <th>Working Hours</th>
                     <th>Status</th>
+                    <th>Location & GPS</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -340,11 +343,37 @@ export default function AdminAttendance() {
                             {r.status?.toUpperCase()}
                           </span>
                         </td>
+                        <td>
+                          {r.checkInLat && r.checkInLng ? (
+                            <div className="d-flex align-items-center gap-1.5">
+                              <span 
+                                className="badge bg-light text-primary border d-inline-flex align-items-center gap-1"
+                                style={{ fontSize: '11.5px', padding: '5px 8px', borderRadius: '6px' }}
+                                title={`Check-in GPS: ${r.checkInLat.toFixed(5)}, ${r.checkInLng.toFixed(5)}${r.checkOutLat ? ` | Check-out: ${r.checkOutLat.toFixed(5)}, ${r.checkOutLng.toFixed(5)}` : ''}`}
+                              >
+                                <MapPin size={12} className="text-primary" />
+                                <span>Within 25m</span>
+                              </span>
+                              <a
+                                href={`https://www.google.com/maps?q=${r.checkInLat},${r.checkInLng}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-decoration-none text-muted"
+                                title="View check-in GPS on Google Maps"
+                                style={{ padding: '2px 4px' }}
+                              >
+                                <ExternalLink size={12} />
+                              </a>
+                            </div>
+                          ) : (
+                            <span className="text-muted" style={{ fontSize: '12.5px' }}>-</span>
+                          )}
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="text-center py-5 text-muted">
+                      <td colSpan={8} className="text-center py-5 text-muted">
                         No attendance records found for the selected criteria.
                       </td>
                     </tr>

@@ -56,3 +56,21 @@ export const markAllAsRead = async (token: string) => {
   }
 };
 
+export const registerPushToken = async (pushToken: string, platform: string, token: string) => {
+  try {
+    const res = await axios.post(
+      `${API_URL}/api/notifications/push-token`,
+      {
+        token: pushToken,
+        platform: platform === 'ios' ? 'ios' : 'android'
+      },
+      {
+        headers: { Authorization: `Bearer ${token}` }
+      }
+    );
+    return res.data;
+  } catch (error: any) {
+    return error.response?.data || { success: false, error: { message: 'Failed to register push token' } };
+  }
+};
+

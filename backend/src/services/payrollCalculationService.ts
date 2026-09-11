@@ -6,7 +6,7 @@ export interface PayrollSettings {
   calculation_method: 'WORKING_DAYS' | 'CALENDAR_DAYS' | 'FIXED_DAYS';
   fixed_working_days: number;
   weekly_offs: string; // e.g. "0" for Sunday
-  late_deduction_rule: 'NONE' | 'THREE_LATE_HALF_DAY' | 'THREE_LATE_FULL_DAY';
+  late_deduction_rule: 'NONE' | 'THREE_LATE_HALF_DAY' | 'FOUR_LATE_HALF_DAY' | 'THREE_LATE_FULL_DAY';
   pf_enabled: boolean;
   pf_employee_percent: number;
   pf_employer_percent: number;
@@ -317,6 +317,8 @@ export class PayrollCalculationService {
       let lateDeductionDays = 0;
       if (settings.late_deduction_rule === 'THREE_LATE_HALF_DAY') {
         lateDeductionDays = Math.floor(lateDays / 3) * 0.5;
+      } else if (settings.late_deduction_rule === 'FOUR_LATE_HALF_DAY') {
+        lateDeductionDays = Math.floor(lateDays / 4) * 0.5;
       } else if (settings.late_deduction_rule === 'THREE_LATE_FULL_DAY') {
         lateDeductionDays = Math.floor(lateDays / 3) * 1.0;
       }

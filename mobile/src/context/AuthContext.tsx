@@ -24,6 +24,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // For local development on Android emulator, 10.0.2.2 points to host machine.
 // For iOS Simulator, localhost works.
 import { Platform } from 'react-native';
+import { registerForPushNotificationsAsync } from '../services/pushNotificationService';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || (Platform.OS === 'android' ? 'http://10.0.2.2:3000' : 'http://localhost:3000');
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -44,6 +45,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (role === 'employee' || role === 'admin') {
             setToken(storedToken);
             setUser(response.data.user);
+            registerForPushNotificationsAsync(storedToken).catch((err) =>
+              console.warn('[Push] Registration error:', err)
+            );
           } else {
             await SecureStore.deleteItemAsync('userToken');
           }
@@ -63,6 +67,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await SecureStore.setItemAsync('userToken', newToken);
     setToken(newToken);
     setUser(newUser);
+    registerForPushNotificationsAsync(newToken).catch((err) =>
+      console.warn('[Push] Registration error:', err)
+    );
   };
 
   const logout = async () => {

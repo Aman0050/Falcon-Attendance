@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
-import { getProfile, updateProfile, changePassword } from '../api/profileApi';
+import { getProfile, updateProfile, changePassword, resolvePhotoUrl } from '../api/profileApi';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function ProfileScreen() {
@@ -23,6 +23,8 @@ export default function ProfileScreen() {
 
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
 
   // Modals
   const [showEdit, setShowEdit] = useState(false);
@@ -45,6 +47,7 @@ export default function ProfileScreen() {
       setProfile(res.data);
       setPhone(res.data.phone || '');
       setPhotoUrl(res.data.profilePhotoUrl || '');
+      setImageError(false);
     }
     setLoading(false);
   };
@@ -105,13 +108,36 @@ export default function ProfileScreen() {
 
         {profile && (
           <View style={styles.card}>
-            {profile.profilePhotoUrl ? (
-              <Image source={{ uri: profile.profilePhotoUrl }} style={styles.photo} />
-            ) : (
-              <View style={styles.photoPlaceholder}>
-                <Text style={styles.photoText}>{profile.name?.[0]?.toUpperCase() || 'U'}</Text>
-              </View>
-            )}
+            {(() => {
+              const photoUri = resolvePhotoUrl(profile.profilePhotoUrl);
+              if (photoUri && !imageError) {
+                return (
+                  <View style={styles.photoContainer}>
+                    <Image
+                      source={{ uri: photoUri }}
+                      style={styles.photo}
+                      onLoadStart={() => setImageLoading(true)}
+                      onLoadEnd={() => setImageLoading(false)}
+                      onError={(e) => {
+                        console.warn('Profile photo load error from:', photoUri, e.nativeEvent?.error);
+                        setImageError(true);
+                      }}
+                      resizeMode="cover"
+                    />
+                    {imageLoading && (
+                      <View style={[styles.photo, styles.photoLoadingOverlay]}>
+                        <ActivityIndicator size="small" color="#2563EB" />
+                      </View>
+                    )}
+                  </View>
+                );
+              }
+              return (
+                <View style={styles.photoPlaceholder}>
+                  <Text style={styles.photoText}>{profile.name?.[0]?.toUpperCase() || 'U'}</Text>
+                </View>
+              );
+            })()}
 
             <Text style={styles.name}>{profile.name}</Text>
             <Text style={styles.designation}>
@@ -123,6 +149,18 @@ export default function ProfileScreen() {
                 <Ionicons name="shield-outline" size={12} color="#2563EB" style={{ marginRight: 4 }} />
                 <Text style={styles.roleBadgeText}>{(profile.role || 'EMPLOYEE').toUpperCase()}</Text>
               </View>
+
+              {profile.jobStatus === 'Provisional' ? (
+                <View style={styles.provisionalBadge}>
+                  <Ionicons name="time-outline" size={12} color="#D97706" style={{ marginRight: 4 }} />
+                  <Text style={styles.provisionalBadgeText}>PROVISIONAL</Text>
+                </View>
+              ) : (
+                <View style={styles.permanentBadge}>
+                  <Ionicons name="checkmark-circle-outline" size={12} color="#059669" style={{ marginRight: 4 }} />
+                  <Text style={styles.permanentBadgeText}>PERMANENT</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.infoSection}>
@@ -132,6 +170,16 @@ export default function ProfileScreen() {
                   <Text style={styles.label}>Employee ID</Text>
                 </View>
                 <Text style={styles.value}>{profile.employeeId}</Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <View style={styles.iconLabel}>
+                  <Ionicons name="briefcase-outline" size={16} color="#64748B" />
+                  <Text style={styles.label}>Job Status</Text>
+                </View>
+                <Text style={[styles.value, { fontWeight: '700', color: profile.jobStatus === 'Provisional' ? '#D97706' : '#059669' }]}>
+                  {profile.jobStatus || 'Permanent'}
+                </Text>
               </View>
 
               <View style={styles.infoRow}>
@@ -156,6 +204,39 @@ export default function ProfileScreen() {
                   <Text style={styles.label}>Joined On</Text>
                 </View>
                 <Text style={styles.value}>{profile.joiningDate || 'N/A'}</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Probation Period Timeline Card */}
+        {profile && profile.jobStatus === 'Provisional' && (
+          <View style={styles.probationCard}>
+            <View style={styles.probationHeader}>
+              <View style={styles.probationTitleRow}>
+                <Ionicons name="time" size={18} color="#D97706" />
+                <Text style={styles.probationTitle}>Provisional Probation Stage</Text>
+              </View>
+              {profile.daysRemaining !== null && (
+                <View style={[styles.daysBadge, { backgroundColor: profile.daysRemaining > 0 ? '#FEF3C7' : '#FEE2E2' }]}>
+                  <Text style={[styles.daysBadgeText, { color: profile.daysRemaining > 0 ? '#B45309' : '#DC2626' }]}>
+                    {profile.daysRemaining > 0 ? `${profile.daysRemaining} days left` : 'Probation Ended'}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.probationSubtitle}>
+              You are currently under provisional probation. Your stage will be transitioned to permanent upon HR review.
+            </Text>
+
+            <View style={styles.probationDatesRow}>
+              <View style={styles.probationDateBox}>
+                <Text style={styles.probationDateLabel}>PROVISIONAL START</Text>
+                <Text style={styles.probationDateValue}>{profile.provisionalStartDate || profile.joiningDate || '-'}</Text>
+              </View>
+              <View style={styles.probationDateBox}>
+                <Text style={styles.probationDateLabel}>PROVISIONAL END</Text>
+                <Text style={styles.probationDateValue}>{profile.provisionalEndDate || 'Under Review'}</Text>
               </View>
             </View>
           </View>
@@ -323,13 +404,29 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     alignItems: 'center',
   },
-  photo: {
+  photoContainer: {
     width: 90,
     height: 90,
     borderRadius: 45,
     marginBottom: 14,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  photo: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     borderWidth: 3,
     borderColor: '#BFDBFE',
+    backgroundColor: '#EFF6FF',
+  },
+  photoLoadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 246, 255, 0.6)',
   },
   photoPlaceholder: {
     width: 90,
@@ -365,7 +462,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     marginBottom: 20,
+    flexWrap: 'wrap',
   },
   roleBadge: {
     flexDirection: 'row',
@@ -382,6 +484,105 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  permanentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+  },
+  permanentBadgeText: {
+    color: '#065F46',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  provisionalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+  },
+  provisionalBadgeText: {
+    color: '#92400E',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  probationCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FEF3C7',
+    shadowColor: '#D97706',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  probationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  probationTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  probationTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#92400E',
+  },
+  daysBadge: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+  },
+  daysBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  probationSubtitle: {
+    fontSize: 12.5,
+    color: '#78350F',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  probationDatesRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  probationDateBox: {
+    flex: 1,
+    backgroundColor: '#FFFDF5',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: 12,
+    padding: 10,
+  },
+  probationDateLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B45309',
+    marginBottom: 3,
+  },
+  probationDateValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E293B',
   },
   infoSection: {
     width: '100%',

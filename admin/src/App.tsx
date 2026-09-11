@@ -307,8 +307,8 @@ function AdminDashboardView() {
 }
 
 function DashboardRouter() {
-  const { user } = useAuth();
-  if (user?.role?.toLowerCase() === 'admin') {
+  const { activeView } = useAuth();
+  if (activeView === 'admin') {
     return <AdminDashboardView />;
   } else {
     return <EmployeeDashboard />;
@@ -316,8 +316,8 @@ function DashboardRouter() {
 }
 
 function SettingsRouter() {
-  const { user } = useAuth();
-  if (user?.role?.toLowerCase() === 'admin') {
+  const { activeView } = useAuth();
+  if (activeView === 'admin') {
     return <AdminSettings />;
   } else {
     return (
@@ -413,8 +413,8 @@ function App() {
                 <Route path="/leave-init" element={<LeaveInitialization />} />
               </Route>
 
-              {/* Employee Routes */}
-              <Route element={<ProtectedRoute allowedRoles={['employee']} />}>
+              {/* Personal Self-Service Routes (Available to Employees & Admins) */}
+              <Route element={<ProtectedRoute allowedRoles={['employee', 'admin']} />}>
                 <Route path="/my-attendance" element={<MyAttendance />} />
                 <Route path="/my-leave" element={<MyLeave />} />
                 <Route path="/salary-slips" element={<SalarySlips />} />

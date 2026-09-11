@@ -174,7 +174,7 @@ export default function AdminPayrollSettings() {
                 >
                   <option value="NONE">No Deduction (Grace)</option>
                   <option value="THREE_LATE_HALF_DAY">3 Late Marks = 0.5 Day Salary Deduction</option>
-                  <option value="THREE_LATE_FULL_DAY">3 Late Marks = 1.0 Day Salary Deduction</option>
+                  <option value="FOUR_LATE_HALF_DAY">4 Late Marks = 0.5 Day Salary Deduction</option>
                 </select>
               </div>
             </div>

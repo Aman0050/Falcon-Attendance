@@ -12,6 +12,10 @@ export default function AddEmployeeScreen({ navigation, route }: any) {
     department: '',
     designation: '',
     role: 'employee',
+    roles: ['employee'],
+    jobStatus: 'Permanent',
+    provisionalStartDate: '',
+    provisionalEndDate: '',
   });
   const [loading, setLoading] = useState(false);
 
@@ -116,21 +120,83 @@ export default function AddEmployeeScreen({ navigation, route }: any) {
           onChangeText={(text) => setFormData({ ...formData, designation: text })}
         />
 
-        <Text style={styles.label}>Role</Text>
+        <Text style={styles.label}>System Roles * (Multi-select)</Text>
         <View style={styles.roleContainer}>
           <TouchableOpacity 
-            style={[styles.roleButton, formData.role === 'employee' && styles.roleButtonActive]}
-            onPress={() => setFormData({ ...formData, role: 'employee' })}
+            style={[styles.roleButton, formData.roles.includes('employee') && styles.roleButtonActive]}
+            onPress={() => {
+              const next = formData.roles.includes('employee')
+                ? formData.roles.filter((r) => r !== 'employee')
+                : [...formData.roles, 'employee'];
+              if (next.length === 0) {
+                Alert.alert('Validation Error', 'At least one role must be selected.');
+                return;
+              }
+              setFormData({ ...formData, roles: next, role: next.includes('admin') ? 'admin' : 'employee' });
+            }}
           >
-            <Text style={[styles.roleText, formData.role === 'employee' && styles.roleTextActive]}>Employee</Text>
+            <Text style={[styles.roleText, formData.roles.includes('employee') && styles.roleTextActive]}>
+              {formData.roles.includes('employee') ? '✓ Employee' : 'Employee'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity 
-            style={[styles.roleButton, formData.role === 'admin' && styles.roleButtonActive]}
-            onPress={() => setFormData({ ...formData, role: 'admin' })}
+            style={[styles.roleButton, formData.roles.includes('admin') && styles.roleButtonActive]}
+            onPress={() => {
+              const next = formData.roles.includes('admin')
+                ? formData.roles.filter((r) => r !== 'admin')
+                : [...formData.roles, 'admin'];
+              if (next.length === 0) {
+                Alert.alert('Validation Error', 'At least one role must be selected.');
+                return;
+              }
+              setFormData({ ...formData, roles: next, role: next.includes('admin') ? 'admin' : 'employee' });
+            }}
           >
-            <Text style={[styles.roleText, formData.role === 'admin' && styles.roleTextActive]}>Admin</Text>
+            <Text style={[styles.roleText, formData.roles.includes('admin') && styles.roleTextActive]}>
+              {formData.roles.includes('admin') ? '✓ Admin' : 'Admin'}
+            </Text>
           </TouchableOpacity>
         </View>
+
+        <Text style={styles.label}>Employment Job Status *</Text>
+        <View style={styles.roleContainer}>
+          <TouchableOpacity 
+            style={[styles.roleButton, formData.jobStatus === 'Permanent' && styles.roleButtonActive]}
+            onPress={() => setFormData({ ...formData, jobStatus: 'Permanent' })}
+          >
+            <Text style={[styles.roleText, formData.jobStatus === 'Permanent' && styles.roleTextActive]}>Permanent</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.roleButton, formData.jobStatus === 'Provisional' && styles.roleButtonActive]}
+            onPress={() => setFormData({ 
+              ...formData, 
+              jobStatus: 'Provisional',
+              provisionalStartDate: formData.provisionalStartDate || new Date().toISOString().substring(0, 10)
+            })}
+          >
+            <Text style={[styles.roleText, formData.jobStatus === 'Provisional' && styles.roleTextActive]}>Provisional</Text>
+          </TouchableOpacity>
+        </View>
+
+        {formData.jobStatus === 'Provisional' && (
+          <>
+            <Text style={styles.label}>Provisional Start Date (YYYY-MM-DD)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 2026-09-11"
+              value={formData.provisionalStartDate}
+              onChangeText={(text) => setFormData({ ...formData, provisionalStartDate: text })}
+            />
+
+            <Text style={styles.label}>Provisional End Date (YYYY-MM-DD)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. 2026-12-11"
+              value={formData.provisionalEndDate}
+              onChangeText={(text) => setFormData({ ...formData, provisionalEndDate: text })}
+            />
+          </>
+        )}
 
         <TouchableOpacity 
           style={styles.submitButton} 

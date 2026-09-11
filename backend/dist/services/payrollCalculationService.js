@@ -198,6 +198,9 @@ class PayrollCalculationService {
             if (settings.late_deduction_rule === 'THREE_LATE_HALF_DAY') {
                 lateDeductionDays = Math.floor(lateDays / 3) * 0.5;
             }
+            else if (settings.late_deduction_rule === 'FOUR_LATE_HALF_DAY') {
+                lateDeductionDays = Math.floor(lateDays / 4) * 0.5;
+            }
             else if (settings.late_deduction_rule === 'THREE_LATE_FULL_DAY') {
                 lateDeductionDays = Math.floor(lateDays / 3) * 1.0;
             }

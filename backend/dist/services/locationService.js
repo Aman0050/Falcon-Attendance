@@ -14,6 +14,7 @@ const verifyLocation = async (latitude, longitude, accuracy) => {
     const officeResult = await (0, db_1.query)(`
     SELECT 
       id, 
+      name,
       radius_meters,
       ST_Distance(location, ST_SetSRID(ST_MakePoint($1, $2), 4326)) AS distance_meters
     FROM offices 
@@ -35,7 +36,8 @@ const verifyLocation = async (latitude, longitude, accuracy) => {
         distanceMeters: Math.round(distanceMeters * 10) / 10,
         allowedRadiusMeters: office.radius_meters,
         accuracyMeters: Math.round(accuracy),
-        officeId: office.id
+        officeId: office.id,
+        officeName: office.name || 'Falcon Info Solutions HQ'
     };
 };
 exports.verifyLocation = verifyLocation;

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteHoliday = exports.addHoliday = exports.getHolidays = exports.updateSettings = exports.getSettings = void 0;
+exports.updateOfficeSettings = exports.getOfficeSettings = exports.deleteHoliday = exports.addHoliday = exports.getHolidays = exports.updateSettings = exports.getSettings = void 0;
 const db_1 = require("../db");
 const zod_1 = require("zod");
 const settingsSchema = zod_1.z.object({
@@ -106,3 +106,124 @@ const deleteHoliday = async (req, res) => {
     }
 };
 exports.deleteHoliday = deleteHoliday;
+const officeSettingsSchema = zod_1.z.object({
+    name: zod_1.z.string().min(1, 'Office name is required'),
+    latitude: zod_1.z.number().min(-90).max(90),
+    longitude: zod_1.z.number().min(-180).max(180),
+    radiusMeters: zod_1.z.number().int().min(5, 'Radius must be at least 5 metres').max(1000, 'Radius cannot exceed 1000 metres'),
+    status: zod_1.z.enum(['active', 'inactive']).optional()
+});
+const getOfficeSettings = async (req, res) => {
+    try {
+        const officeRes = await (0, db_1.query)(`
+      SELECT 
+        id, 
+        name, 
+        radius_meters as "radiusMeters", 
+        ST_Y(location::geometry) as "latitude", 
+        ST_X(location::geometry) as "longitude", 
+        status, 
+        updated_at as "updatedAt"
+      FROM offices 
+      WHERE status = 'active' 
+      ORDER BY id ASC 
+      LIMIT 1
+    `);
+        if (officeRes.rows.length === 0) {
+            res.status(404).json({ success: false, error: { message: 'No active office configured' } });
+            return;
+        }
+        const row = officeRes.rows[0];
+        res.json({
+            success: true,
+            data: {
+                id: row.id,
+                name: row.name,
+                radiusMeters: row.radiusMeters,
+                latitude: parseFloat(row.latitude),
+                longitude: parseFloat(row.longitude),
+                status: row.status,
+                updatedAt: row.updatedAt
+            }
+        });
+    }
+    catch (error) {
+        console.error('getOfficeSettings error:', error);
+        res.status(500).json({ success: false, error: { message: 'Server error retrieving office settings' } });
+    }
+};
+exports.getOfficeSettings = getOfficeSettings;
+const updateOfficeSettings = async (req, res) => {
+    try {
+        const parsed = officeSettingsSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({
+                success: false,
+                error: { message: parsed.error.issues[0]?.message || 'Invalid office settings data' }
+            });
+            return;
+        }
+        const { name, latitude, longitude, radiusMeters, status } = parsed.data;
+        const existRes = await (0, db_1.query)(`SELECT id FROM offices WHERE status = 'active' ORDER BY id ASC LIMIT 1`);
+        let officeId = existRes.rows.length > 0 ? existRes.rows[0].id : 1;
+        let updatedRow;
+        if (existRes.rows.length > 0) {
+            const updateRes = await (0, db_1.query)(`
+        UPDATE offices 
+        SET 
+          name = $1, 
+          latitude = $2::numeric, 
+          longitude = $3::numeric, 
+          location = ST_SetSRID(ST_MakePoint($3::float8, $2::float8), 4326),
+          radius_meters = $4,
+          status = COALESCE($5, status),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $6
+        RETURNING id, name, radius_meters as "radiusMeters", ST_Y(location::geometry) as "latitude", ST_X(location::geometry) as "longitude", status, updated_at as "updatedAt"
+      `, [name, latitude, longitude, radiusMeters, status || 'active', officeId]);
+            updatedRow = updateRes.rows[0];
+        }
+        else {
+            const insertRes = await (0, db_1.query)(`
+        INSERT INTO offices (name, latitude, longitude, location, radius_meters, status)
+        VALUES ($1, $2::numeric, $3::numeric, ST_SetSRID(ST_MakePoint($3::float8, $2::float8), 4326), $4, 'active')
+        RETURNING id, name, radius_meters as "radiusMeters", ST_Y(location::geometry) as "latitude", ST_X(location::geometry) as "longitude", status, updated_at as "updatedAt"
+      `, [name, latitude, longitude, radiusMeters]);
+            updatedRow = insertRes.rows[0];
+        }
+        // Audit log
+        try {
+            await (0, db_1.query)(`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [
+                req.user?.id,
+                'UPDATE_OFFICE_SETTINGS',
+                'OFFICE',
+                updatedRow.id,
+                JSON.stringify({ name, latitude, longitude, radiusMeters, status: updatedRow.status })
+            ]);
+        }
+        catch (auditErr) {
+            console.error('Audit log error updating office settings:', auditErr);
+        }
+        res.json({
+            success: true,
+            message: 'Office location and geo-fence radius updated successfully',
+            data: {
+                id: updatedRow.id,
+                name: updatedRow.name,
+                radiusMeters: updatedRow.radiusMeters,
+                latitude: parseFloat(updatedRow.latitude),
+                longitude: parseFloat(updatedRow.longitude),
+                status: updatedRow.status,
+                updatedAt: updatedRow.updatedAt
+            }
+        });
+    }
+    catch (error) {
+        console.error('updateOfficeSettings error:', error);
+        res.status(500).json({ success: false, error: { message: 'Server error updating office settings' } });
+    }
+};
+exports.updateOfficeSettings = updateOfficeSettings;

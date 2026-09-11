@@ -88,6 +88,17 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
     const countRes = await query(`SELECT COUNT(*) as total FROM notifications ${filterQuery}`, queryParams);
     const total = parseInt(countRes.rows[0].total) || 0;
 
+    // Unread count for current user
+    const unreadCountRes = await query(
+      `SELECT COUNT(*) as unread_count 
+       FROM notifications 
+       WHERE deleted_at IS NULL 
+         AND is_read = FALSE 
+         AND (recipient_user_id = $1 OR (role = $2 AND recipient_user_id IS NULL))`,
+      [userId, userRole]
+    );
+    const unreadCount = parseInt(unreadCountRes.rows[0].unread_count) || 0;
+
     // Fetch paginated rows
     const itemsRes = await query(
       `SELECT id, recipient_user_id as "recipientUserId", sender_user_id as "senderUserId",
@@ -110,6 +121,7 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
           total,
           totalPages: Math.ceil(total / limit) || 1,
         },
+        unreadCount,
       },
     });
   } catch (error) {
@@ -120,7 +132,7 @@ export const getNotifications = async (req: AuthRequest, res: Response): Promise
 
 /**
  * GET /api/notifications/unread
- * Returns unread count and latest 5 unread notifications for the header bell dropdown
+ * Returns unread count and latest unread/recent notifications for the header bell dropdown
  */
 export const getUnreadNotifications = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -138,7 +150,7 @@ export const getUnreadNotifications = async (req: AuthRequest, res: Response): P
     );
     const count = parseInt(countRes.rows[0].unread_count) || 0;
 
-    // Latest 5 notifications for dropdown
+    // Latest 10 notifications for dropdown
     const latestRes = await query(
       `SELECT id, recipient_user_id as "recipientUserId", role, title, message, 
               type, priority, action_url as "actionUrl", icon, is_read as "isRead", 
@@ -147,7 +159,7 @@ export const getUnreadNotifications = async (req: AuthRequest, res: Response): P
        WHERE deleted_at IS NULL 
          AND (recipient_user_id = $1 OR (role = $2 AND recipient_user_id IS NULL))
        ORDER BY created_at DESC
-       LIMIT 6`,
+       LIMIT 10`,
       [userId, userRole]
     );
 
@@ -156,6 +168,7 @@ export const getUnreadNotifications = async (req: AuthRequest, res: Response): P
       data: {
         unreadCount: count,
         latest: latestRes.rows,
+        items: latestRes.rows,
       },
     });
   } catch (error) {
@@ -434,4 +447,51 @@ export const notificationStream = (req: AuthRequest, res: Response): void => {
 
   // Register with SSEManager
   NotificationService.registerSSEClient(userId, res);
+};
+
+const broadcastSchema = z.object({
+  title: z.string().optional().default('📢 Company Announcement'),
+  message: z.string().min(3, 'Announcement message is required'),
+  priority: z.enum(['Low', 'Medium', 'High', 'Critical']).optional().default('High'),
+  target: z.enum(['all', 'employee', 'admin']).optional().default('employee'),
+});
+
+/**
+ * POST /api/notifications/broadcast
+ * Broadcast company announcement to employees (Admin only)
+ */
+export const broadcastAnnouncement = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (req.user!.role?.toLowerCase() !== 'admin') {
+      res.status(403).json({ success: false, error: { message: 'Only administrators can broadcast announcements' } });
+      return;
+    }
+
+    const parsed = broadcastSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: { message: parsed.error.issues[0].message } });
+      return;
+    }
+
+    const { title, message, priority, target } = parsed.data;
+
+    const result = await NotificationService.send({
+      role: target as any,
+      senderUserId: req.user!.id,
+      title: title || '📢 Company Announcement',
+      message,
+      type: 'Announcement',
+      priority: priority as any,
+      actionUrl: '/notifications',
+    });
+
+    res.json({
+      success: true,
+      message: 'Announcement broadcasted successfully',
+      data: { count: result.count },
+    });
+  } catch (error) {
+    console.error('broadcastAnnouncement error:', error);
+    res.status(500).json({ success: false, error: { message: 'Failed to broadcast announcement' } });
+  }
 };

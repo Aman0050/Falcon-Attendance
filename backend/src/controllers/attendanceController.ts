@@ -37,8 +37,15 @@ export const checkIn = async (req: AuthRequest, res: Response): Promise<void> =>
     if (!locResult.insideOffice) {
       res.status(403).json({
         success: false,
-        error: { code: 'OUTSIDE_OFFICE', message: 'You must be at the Falcon Info Solutions office to mark attendance.' },
-        data: { distanceMeters: locResult.distanceMeters, allowedRadiusMeters: locResult.allowedRadiusMeters }
+        error: { 
+          code: 'OUTSIDE_OFFICE', 
+          message: `You are outside the permitted office location (${locResult.distanceMeters}m away). Check-in is only permitted within ${locResult.allowedRadiusMeters} metres of ${locResult.officeName || 'the office'}.` 
+        },
+        data: { 
+          distanceMeters: locResult.distanceMeters, 
+          allowedRadiusMeters: locResult.allowedRadiusMeters,
+          officeName: locResult.officeName 
+        }
       });
       return;
     }
@@ -79,16 +86,49 @@ export const checkIn = async (req: AuthRequest, res: Response): Promise<void> =>
       newRecord = insertRes.rows[0];
     }
 
+    // Audit log for location coordinates
+    try {
+      await query(`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [
+        employeeId,
+        'ATTENDANCE_CHECK_IN',
+        'ATTENDANCE',
+        newRecord.id,
+        JSON.stringify({
+          latitude,
+          longitude,
+          accuracy,
+          distanceMeters: locResult.distanceMeters,
+          allowedRadiusMeters: locResult.allowedRadiusMeters,
+          officeId: locResult.officeId,
+          officeName: locResult.officeName,
+          insideOffice: true,
+          timestamp: new Date().toISOString()
+        })
+      ]);
+    } catch (auditErr) {
+      console.error('Check-in audit log error:', auditErr);
+    }
+
     // Trigger Smart Notifications
     try {
       const settings = await getAttendanceSettings();
-      const timeStr = new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata' });
-      const isLate = settings && settings.late_threshold && timeStr > settings.late_threshold;
+      const now = new Date();
+      const timeStr24 = now.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata' });
+      const timeStr12 = now.toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+      });
+      const isLate = settings && settings.late_threshold && timeStr24 > settings.late_threshold;
 
       if (isLate) {
         await NotificationService.notifyUser(employeeId, {
-          title: 'Late Check-In',
-          message: `You marked attendance at ${timeStr}, which is past the late threshold (${settings.late_threshold}).`,
+          title: '⚠️ Late Check-In',
+          message: `Your attendance has been marked at ${timeStr12} (Past late threshold of ${settings.late_threshold}).`,
           type: 'Attendance',
           priority: 'High',
           actionUrl: '/my-attendance',
@@ -97,7 +137,7 @@ export const checkIn = async (req: AuthRequest, res: Response): Promise<void> =>
 
         await NotificationService.notifyAdmins({
           title: 'Employee Checked In Late',
-          message: `${req.user!.name || 'An employee'} checked in late today at ${timeStr}.`,
+          message: `${req.user!.name || 'An employee'} checked in late today at ${timeStr12}.`,
           type: 'Attendance',
           priority: 'Medium',
           actionUrl: '/attendance',
@@ -105,8 +145,8 @@ export const checkIn = async (req: AuthRequest, res: Response): Promise<void> =>
         });
       } else {
         await NotificationService.notifyUser(employeeId, {
-          title: 'Check-In Confirmed',
-          message: `Your check-in was verified successfully at ${timeStr}.`,
+          title: '✅ Check-In Successful',
+          message: `Your attendance has been marked successfully at ${timeStr12}.`,
           type: 'Attendance',
           priority: 'Low',
           actionUrl: '/my-attendance',
@@ -158,8 +198,15 @@ export const checkOut = async (req: AuthRequest, res: Response): Promise<void> =
     if (!locResult.insideOffice) {
       res.status(403).json({
         success: false,
-        error: { code: 'OUTSIDE_OFFICE', message: 'You must be at the Falcon Info Solutions office to mark attendance.' },
-        data: { distanceMeters: locResult.distanceMeters, allowedRadiusMeters: locResult.allowedRadiusMeters }
+        error: { 
+          code: 'OUTSIDE_OFFICE', 
+          message: `You are outside the permitted office location (${locResult.distanceMeters}m away). Check-out is only permitted within ${locResult.allowedRadiusMeters} metres of ${locResult.officeName || 'the office'}.` 
+        },
+        data: { 
+          distanceMeters: locResult.distanceMeters, 
+          allowedRadiusMeters: locResult.allowedRadiusMeters,
+          officeName: locResult.officeName 
+        }
       });
       return;
     }
@@ -191,6 +238,32 @@ export const checkOut = async (req: AuthRequest, res: Response): Promise<void> =
     `, [longitude, latitude, attendance.id]);
 
     const updated = updateRes.rows[0];
+
+    // Audit log for location coordinates
+    try {
+      await query(`
+        INSERT INTO audit_logs (user_id, action, entity_type, entity_id, metadata)
+        VALUES ($1, $2, $3, $4, $5)
+      `, [
+        employeeId,
+        'ATTENDANCE_CHECK_OUT',
+        'ATTENDANCE',
+        updated.id,
+        JSON.stringify({
+          latitude,
+          longitude,
+          accuracy,
+          distanceMeters: locResult.distanceMeters,
+          allowedRadiusMeters: locResult.allowedRadiusMeters,
+          officeId: locResult.officeId,
+          officeName: locResult.officeName,
+          insideOffice: true,
+          timestamp: new Date().toISOString()
+        })
+      ]);
+    } catch (auditErr) {
+      console.error('Check-out audit log error:', auditErr);
+    }
 
     // Notification
     try {

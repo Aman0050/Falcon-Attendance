@@ -5,6 +5,61 @@ import { NotificationService } from './notificationService';
 import { checkAndSendLateAttendanceAlerts } from './whatsappService';
 
 export function startScheduler() {
+  // 10:00 AM IST - Daily Morning Attendance Check-In Reminder Push Notification
+  cron.schedule('0 10 * * 1-6', async () => {
+    try {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+      // Check holidays
+      const holidayRes = await query('SELECT id FROM holidays WHERE holiday_date = $1 AND is_active = true', [dateStr]);
+      if (holidayRes.rows.length > 0) return;
+
+      // Find active employees without check-in today and without approved leave
+      const missingRes = await query(`
+        SELECT u.id, u.name
+        FROM users u
+        WHERE u.status = 'active'
+          AND u.role IN ('employee', 'admin')
+          AND NOT EXISTS (
+            SELECT 1 FROM attendance a WHERE a.employee_id = u.id AND a.attendance_date = $1
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM leave_requests lr 
+            WHERE lr.employee_id = u.id 
+              AND lr.status = 'APPROVED' 
+              AND lr.from_date <= $1 
+              AND lr.to_date >= $1
+          )
+      `, [dateStr]);
+
+      for (const emp of missingRes.rows) {
+        try {
+          const alreadyNotified = await query(
+            `SELECT id FROM notifications WHERE recipient_user_id = $1 AND title = '⏰ Reminder' AND attendance_date = $2`,
+            [emp.id, dateStr]
+          );
+          if (alreadyNotified.rows.length === 0) {
+            await NotificationService.notifyUser(emp.id, {
+              title: '⏰ Reminder',
+              message: 'You have not marked your attendance yet. Please check in before 11:00 AM.',
+              type: 'Attendance',
+              priority: 'High',
+              actionUrl: '/home',
+              attendanceDate: dateStr,
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to send morning reminder to user ${emp.id}:`, err);
+        }
+      }
+    } catch (e) {
+      console.error('[Scheduler] 10:00 AM Attendance Reminder error:', e);
+    }
+  }, {
+    timezone: 'Asia/Kolkata'
+  });
+
   // 11:00 AM IST - Daily Late Attendance WhatsApp Alerts
   cron.schedule('0 11 * * *', async () => {
     try {

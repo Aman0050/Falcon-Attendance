@@ -36,10 +36,22 @@ const login = async (req, res) => {
             res.status(401).json({ error: 'Invalid credentials' });
             return;
         }
-        const token = jsonwebtoken_1.default.sign({ id: user.id, employee_id: user.employee_id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        const rawRoles = user.roles;
+        const roles = Array.isArray(rawRoles)
+            ? rawRoles.map((r) => String(r).toLowerCase())
+            : [String(user.role || 'employee').toLowerCase()];
+        const token = jsonwebtoken_1.default.sign({ id: user.id, employee_id: user.employee_id, role: user.role, roles }, JWT_SECRET, { expiresIn: '7d' });
         // Don't send the password hash back
         const { password_hash, ...userWithoutPassword } = user;
-        userWithoutPassword.profilePhotoUrl = user.profile_photo_url;
+        let photoUrl = user.profile_photo_url;
+        if (photoUrl && typeof photoUrl === 'string' && photoUrl.startsWith('/')) {
+            const host = req.get('host');
+            if (host) {
+                photoUrl = `${req.protocol}://${host}${photoUrl}`;
+            }
+        }
+        userWithoutPassword.profilePhotoUrl = photoUrl;
+        userWithoutPassword.roles = roles;
         res.json({
             message: 'Login successful',
             token,
@@ -53,23 +65,32 @@ const login = async (req, res) => {
 };
 exports.login = login;
 const logout = async (req, res) => {
-    // In a stateless JWT setup, client deletes the token. 
-    // For added security, we could implement a token blocklist here.
     res.json({ message: 'Logout successful' });
 };
 exports.logout = logout;
 const getMe = async (req, res) => {
     try {
         if (!req.user) {
-            res.status(401).json({ error: 'Not authenticated' });
+            res.status(401).json({ error: 'Unauthorized' });
             return;
         }
-        const result = await (0, db_1.query)(`SELECT id, employee_id, name, email, phone, role, status, profile_photo_url, profile_photo_url as "profilePhotoUrl", created_at FROM users WHERE id = $1`, [req.user.id]);
+        const result = await (0, db_1.query)(`SELECT id, employee_id, name, email, phone, role, roles, status, profile_photo_url, profile_photo_url as "profilePhotoUrl", created_at FROM users WHERE id = $1`, [req.user.id]);
         if (result.rows.length === 0) {
             res.status(404).json({ error: 'User not found' });
             return;
         }
-        res.json({ user: result.rows[0] });
+        const dbUser = result.rows[0];
+        const rawRoles = dbUser.roles;
+        dbUser.roles = Array.isArray(rawRoles)
+            ? rawRoles.map((r) => String(r).toLowerCase())
+            : [String(dbUser.role || 'employee').toLowerCase()];
+        if (dbUser.profilePhotoUrl && typeof dbUser.profilePhotoUrl === 'string' && dbUser.profilePhotoUrl.startsWith('/')) {
+            const host = req.get('host');
+            if (host) {
+                dbUser.profilePhotoUrl = `${req.protocol}://${host}${dbUser.profilePhotoUrl}`;
+            }
+        }
+        res.json({ user: dbUser });
     }
     catch (error) {
         console.error('getMe error:', error);

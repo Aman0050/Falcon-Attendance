@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/HomeScreen';
+import LeaveScreen from '../screens/LeaveScreen';
 import HistoryScreen from '../screens/HistoryScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
@@ -24,6 +25,8 @@ export default function TabNavigator() {
 
           if (route.name === 'Home') {
             iconName = focused ? 'home' : 'home-outline';
+          } else if (route.name === 'Leave') {
+            iconName = focused ? 'calendar-clear' : 'calendar-clear-outline';
           } else if (route.name === 'History') {
             iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'Notifications') {
@@ -61,6 +64,7 @@ export default function TabNavigator() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen name="Leave" component={LeaveScreen} options={{ tabBarLabel: 'Leaves' }} />
       <Tab.Screen name="History" component={HistoryScreen} options={{ tabBarLabel: 'History' }} />
       <Tab.Screen name="Notifications" component={NotificationsScreen} options={{ tabBarLabel: 'Alerts' }} />
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarLabel: 'Profile' }} />

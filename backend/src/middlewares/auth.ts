@@ -9,6 +9,7 @@ export interface AuthRequest extends Request {
     id: number;
     employee_id: string;
     role: string;
+    roles: string[];
     name?: string;
   };
 }
@@ -30,7 +31,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
 
     try {
       const userRes = await query(
-        `SELECT id, employee_id, role, status, name FROM users WHERE id = $1`,
+        `SELECT id, employee_id, role, roles, status, name FROM users WHERE id = $1`,
         [decoded.id]
       );
 
@@ -46,11 +47,17 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
         return;
       }
 
+      const rawRoles = dbUser.roles;
+      const roles: string[] = Array.isArray(rawRoles) 
+        ? rawRoles.map((r: any) => String(r).toLowerCase()) 
+        : [String(dbUser.role || 'employee').toLowerCase()];
+
       // Attach authoritative DB identity
       req.user = {
         id: dbUser.id,
         employee_id: dbUser.employee_id,
         role: dbUser.role,
+        roles,
         name: dbUser.name
       };
       
@@ -71,7 +78,9 @@ export const requireRole = (role: string) => {
       return;
     }
     
-    if (req.user.role.toLowerCase() !== role.toLowerCase()) {
+    const userRoles = req.user.roles || [req.user.role];
+    const hasPermission = userRoles.some(r => r.toLowerCase() === role.toLowerCase());
+    if (!hasPermission) {
       res.status(403).json({ error: 'Forbidden: Insufficient role permissions' });
       return;
     }
@@ -87,8 +96,9 @@ export const shared = (req: AuthRequest, res: Response, next: NextFunction): voi
     res.status(401).json({ error: 'User not authenticated' });
     return;
   }
-  const role = req.user.role.toLowerCase();
-  if (role !== 'admin' && role !== 'employee') {
+  const userRoles = req.user.roles || [req.user.role];
+  const hasPermission = userRoles.some(r => r.toLowerCase() === 'admin' || r.toLowerCase() === 'employee');
+  if (!hasPermission) {
     res.status(403).json({ error: 'Forbidden: Insufficient role permissions' });
     return;
   }

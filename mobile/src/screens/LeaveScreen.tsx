@@ -1,202 +1,512 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, SafeAreaView, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, TextInput } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Modal,
+  TextInput,
+  RefreshControl,
+  Platform,
+  StatusBar,
+  ScrollView,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '../context/AuthContext';
-import { getLeaveBalances, getLeaveHistory, applyLeave, cancelLeaveRequest, LeaveBalance, LeaveRequest } from '../api/leaveApi';
+import {
+  getLeaveBalances,
+  getLeaveHistory,
+  applyLeave,
+  cancelLeaveRequest,
+  LeaveBalance,
+  LeaveRequest,
+} from '../api/leaveApi';
 
 export default function LeaveScreen() {
   const { token } = useAuth();
-  
+
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [history, setHistory] = useState<LeaveRequest[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [applying, setApplying] = useState(false);
   const [showApplyModal, setShowApplyModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
 
   // Form states
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(new Date());
+  const [endDate, setEndDate] = useState(new Date());
   const [reason, setReason] = useState('');
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async (isRefresh = false) => {
     if (!token) return;
-    setLoading(true);
-    const [balRes, histRes] = await Promise.all([
-      getLeaveBalances(token),
-      getLeaveHistory(token, 1)
-    ]);
-    if (balRes.success) setBalance(balRes.data);
-    if (histRes.success) setHistory(histRes.data.items);
-    setLoading(false);
-  };
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      const [balRes, histRes] = await Promise.all([
+        getLeaveBalances(token),
+        getLeaveHistory(token, 1),
+      ]);
+      if (balRes.success) setBalance(balRes.data);
+      if (histRes.success && histRes.data?.items) setHistory(histRes.data.items);
+    } catch (e) {
+      console.error('fetchData error:', e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
+
+  // Calculate requested total days
+  const calculateDays = (start: Date, end: Date) => {
+    const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+    const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    if (s > e) return 0;
+    const diffTime = Math.abs(e.getTime() - s.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  };
+
+  const requestedDays = calculateDays(startDate, endDate);
+  const availableBalance = balance?.currentBalance ?? 0;
+  const isLwpRequired = requestedDays > availableBalance;
+  const lwpDays = isLwpRequired ? requestedDays - availableBalance : 0;
+
+  const formatDateYMD = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDateDisplay = (d: Date) => {
+    return d.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
 
   const handleApply = async () => {
     if (!token) return;
-    if (reason.length < 3) {
-      Alert.alert('Error', 'Reason must be at least 3 characters.');
+
+    if (reason.trim().length < 3) {
+      Alert.alert('Reason Required', 'Please enter a valid reason (at least 3 characters).');
       return;
     }
-    
-    // Check if total days > balance and show confirmation
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    if (start > end) {
-      Alert.alert('Error', 'Start date must be before end date.');
+
+    if (startDate > endDate) {
+      Alert.alert('Invalid Dates', 'Start date must be on or before end date.');
       return;
     }
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-    
-    const available = balance?.currentBalance || 0;
-    
-    if (totalDays > available) {
-      const lwp = totalDays - available;
+
+    if (isLwpRequired) {
       Alert.alert(
-        'Warning', 
-        `You have ${available} days of balance. ${lwp} days will be marked as Leave Without Pay. Proceed?`,
+        'Leave Without Pay Notice',
+        `You have ${availableBalance} paid days available. ${lwpDays} day(s) will be submitted as Leave Without Pay. Do you wish to proceed?`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Confirm', onPress: () => submitLeaveRequest() }
+          { text: 'Proceed', onPress: () => submitLeave() },
         ]
       );
     } else {
-      submitLeaveRequest();
+      submitLeave();
     }
   };
-  
-  const submitLeaveRequest = async () => {
+
+  const submitLeave = async () => {
     if (!token) return;
     setApplying(true);
-    const res = await applyLeave(token, { startDate, endDate, reason });
-    setApplying(false);
-    if (res.success) {
-      Alert.alert('Success', 'Leave request submitted.');
-      setShowApplyModal(false);
-      fetchData(); // Refresh list
-    } else {
-      Alert.alert('Error', res.error?.message || 'Failed to submit leave request.');
+    try {
+      const res = await applyLeave(token, {
+        startDate: formatDateYMD(startDate),
+        endDate: formatDateYMD(endDate),
+        reason: reason.trim(),
+      });
+
+      if (res.success) {
+        Alert.alert('Success 🎉', 'Your leave request has been submitted successfully.');
+        setShowApplyModal(false);
+        setReason('');
+        setStartDate(new Date());
+        setEndDate(new Date());
+        fetchData(true);
+      } else {
+        Alert.alert('Submission Failed', res.error?.message || 'Failed to submit leave request.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'An unexpected error occurred.');
+    } finally {
+      setApplying(false);
     }
   };
 
   const handleCancel = (id: number) => {
-    Alert.alert('Cancel Request', 'Are you sure you want to cancel this leave request?', [
-      { text: 'No', style: 'cancel' },
-      { text: 'Yes', onPress: async () => {
-        if (!token) return;
-        const res = await cancelLeaveRequest(token, id);
-        if (res.success) {
-          Alert.alert('Cancelled', 'Request cancelled successfully.');
-          fetchData();
-        } else {
-          Alert.alert('Error', res.error?.message || 'Failed to cancel request.');
-        }
-      }}
+    Alert.alert('Cancel Request', 'Are you sure you want to cancel this leave application?', [
+      { text: 'Keep Request', style: 'cancel' },
+      {
+        text: 'Cancel Request',
+        style: 'destructive',
+        onPress: async () => {
+          if (!token) return;
+          const res = await cancelLeaveRequest(token, id);
+          if (res.success) {
+            Alert.alert('Cancelled', 'Leave request cancelled.');
+            fetchData(true);
+          } else {
+            Alert.alert('Error', res.error?.message || 'Failed to cancel request.');
+          }
+        },
+      },
     ]);
   };
 
-  const renderHistory = ({ item }: { item: LeaveRequest }) => (
-    <View style={styles.historyCard}>
-      <View style={styles.rowBetween}>
-        <Text style={styles.histDates}>{new Date(item.startDate).toLocaleDateString()} - {new Date(item.endDate).toLocaleDateString()}</Text>
-        <Text style={[styles.badge, item.status === 'APPROVED' ? styles.badgeApproved : item.status === 'REJECTED' ? styles.badgeRejected : item.status === 'PENDING' ? styles.badgePending : styles.badgeDefault]}>
-          {item.status}
-        </Text>
+  const filteredHistory = history.filter((item) => {
+    if (statusFilter === 'ALL') return true;
+    return item.status?.toUpperCase() === statusFilter;
+  });
+
+  const getStatusBadgeStyle = (statusStr: string) => {
+    switch (statusStr?.toUpperCase()) {
+      case 'APPROVED':
+        return { bg: '#DCFCE7', text: '#15803D', icon: 'checkmark-circle' as const, label: 'Approved' };
+      case 'PENDING':
+        return { bg: '#FEF3C7', text: '#B45309', icon: 'time' as const, label: 'Pending' };
+      case 'REJECTED':
+        return { bg: '#FEE2E2', text: '#B91C1C', icon: 'close-circle' as const, label: 'Rejected' };
+      default:
+        return { bg: '#F1F5F9', text: '#64748B', icon: 'help-circle' as const, label: statusStr || 'Unknown' };
+    }
+  };
+
+  const renderHistoryItem = ({ item }: { item: LeaveRequest }) => {
+    const badge = getStatusBadgeStyle(item.status);
+    const startStr = item.startDate ? new Date(item.startDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    const endStr = item.endDate ? new Date(item.endDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+
+    return (
+      <View style={styles.historyCard}>
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.leaveTypeTag}>
+            <Ionicons
+              name={item.leaveType?.toLowerCase().includes('without') ? 'remove-circle-outline' : 'shield-checkmark-outline'}
+              size={13}
+              color="#2563EB"
+            />
+            <Text style={styles.leaveTypeTagText}>{item.leaveType || 'Leave'}</Text>
+          </View>
+
+          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+            <Ionicons name={badge.icon} size={12} color={badge.text} style={{ marginRight: 4 }} />
+            <Text style={[styles.statusBadgeText, { color: badge.text }]}>{badge.label}</Text>
+          </View>
+        </View>
+
+        <View style={styles.cardDatesRow}>
+          <Ionicons name="calendar-outline" size={15} color="#475569" style={{ marginRight: 6 }} />
+          <Text style={styles.cardDatesText}>
+            {startStr} {startStr !== endStr && `— ${endStr}`}
+          </Text>
+          <View style={styles.daysPill}>
+            <Text style={styles.daysPillText}>
+              {item.totalDays} {item.totalDays === 1 ? 'day' : 'days'}
+            </Text>
+          </View>
+        </View>
+
+        {!!item.reason && (
+          <View style={styles.reasonBox}>
+            <Text style={styles.reasonText} numberOfLines={2}>
+              "{item.reason}"
+            </Text>
+          </View>
+        )}
+
+        {item.status === 'PENDING' && (
+          <View style={styles.cardFooterRow}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => handleCancel(item.id)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="trash-outline" size={14} color="#EF4444" style={{ marginRight: 4 }} />
+              <Text style={styles.cancelButtonText}>Withdraw Request</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
-      <Text style={styles.histType}>{item.leaveType} • {item.totalDays} day(s)</Text>
-      <Text style={styles.histReason}>{item.reason}</Text>
-      {item.status === 'PENDING' && (
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => handleCancel(item.id)}>
-          <Text style={styles.cancelBtnText}>Cancel Request</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Text style={styles.header}>My Leave</Text>
-      
-      {loading ? (
-        <ActivityIndicator size="large" color="#007BFF" style={{ marginTop: 20 }} />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+
+      {/* Top Header */}
+      <View style={styles.topHeader}>
+        <View>
+          <Text style={styles.headerTitle}>Leave Portal</Text>
+          <Text style={styles.headerSubtitle}>Apply for time-off and track request status</Text>
+        </View>
+      </View>
+
+      {loading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2563EB" />
+          <Text style={styles.loadingText}>Loading leave balances...</Text>
+        </View>
       ) : (
         <FlatList
-          data={history}
+          data={filteredHistory}
           keyExtractor={(item) => item.id.toString()}
-          ListHeaderComponent={(
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchData(true)}
+              colors={['#2563EB']}
+            />
+          }
+          ListHeaderComponent={
             <>
-              <View style={styles.balancesContainer}>
-                <Text style={styles.sectionTitle}>Leave Overview</Text>
-                
-                {balance && balance.eligible ? (
-                  <View style={styles.dashboardCard}>
-                    <View style={styles.balanceGrid}>
-                      <View style={styles.balanceItem}>
-                        <Text style={styles.balanceLabel}>Annual</Text>
-                        <Text style={styles.balanceValue}>18</Text>
-                      </View>
-                      <View style={styles.balanceItem}>
-                        <Text style={styles.balanceLabel}>Accrued</Text>
-                        <Text style={styles.balanceValue}>{balance.accruedLeave}</Text>
-                      </View>
-                      <View style={styles.balanceItem}>
-                        <Text style={styles.balanceLabel}>Used</Text>
-                        <Text style={styles.balanceValue}>{balance.usedPaidLeave}</Text>
-                      </View>
-                      <View style={styles.balanceItem}>
-                        <Text style={styles.balanceLabel}>Available</Text>
-                        <Text style={[styles.balanceValue, { color: '#28a745' }]}>{balance.currentBalance}</Text>
-                      </View>
-                      <View style={styles.balanceItem}>
-                        <Text style={styles.balanceLabel}>LWP</Text>
-                        <Text style={[styles.balanceValue, { color: '#dc3545' }]}>{balance.leaveWithoutPay}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.footerRow}>
-                      <Text style={styles.footerText}>Next Credit: {balance.lastCreditDate ? 'Q-Next' : 'Not Credited Yet'}</Text>
+              {/* Balances Overview Card */}
+              <View style={styles.balanceSummaryCard}>
+                <View style={styles.balanceMainRow}>
+                  <View>
+                    <Text style={styles.balanceCardLabel}>AVAILABLE PAID BALANCE</Text>
+                    <View style={styles.balanceNumberRow}>
+                      <Text style={styles.balanceBigNumber}>
+                        {balance?.currentBalance ?? 0}
+                      </Text>
+                      <Text style={styles.balanceUnit}>Days</Text>
                     </View>
                   </View>
-                ) : (
-                  <View style={styles.dashboardCard}>
-                    <Text style={styles.notEligibleText}>You are not yet eligible for Paid Leaves or leaves have not been initialized.</Text>
+                  <View style={styles.balanceIconWrap}>
+                    <Ionicons name="calendar" size={26} color="#2563EB" />
                   </View>
-                )}
+                </View>
+
+                <View style={styles.balanceGrid}>
+                  <View style={styles.balanceGridItem}>
+                    <Text style={styles.gridLabel}>Accrued</Text>
+                    <Text style={styles.gridValue}>{balance?.accruedLeave ?? 0}d</Text>
+                  </View>
+                  <View style={styles.balanceGridDivider} />
+                  <View style={styles.balanceGridItem}>
+                    <Text style={styles.gridLabel}>Used Paid</Text>
+                    <Text style={styles.gridValue}>{balance?.usedPaidLeave ?? 0}d</Text>
+                  </View>
+                  <View style={styles.balanceGridDivider} />
+                  <View style={styles.balanceGridItem}>
+                    <Text style={styles.gridLabel}>Without Pay</Text>
+                    <Text style={[styles.gridValue, { color: '#DC2626' }]}>
+                      {balance?.leaveWithoutPay ?? 0}d
+                    </Text>
+                  </View>
+                </View>
               </View>
-              <TouchableOpacity style={styles.applyBtn} onPress={() => setShowApplyModal(true)}>
-                <Text style={styles.applyBtnText}>APPLY FOR LEAVE</Text>
+
+              {/* Primary Action Button */}
+              <TouchableOpacity
+                style={styles.applyButton}
+                onPress={() => setShowApplyModal(true)}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add-circle" size={20} color="#FFFFFF" style={{ marginRight: 6 }} />
+                <Text style={styles.applyButtonText}>Apply for Leave</Text>
               </TouchableOpacity>
-              <Text style={styles.sectionTitle}>Leave Requests</Text>
+
+              {/* Filter Tabs */}
+              <View style={styles.historySectionHeader}>
+                <Text style={styles.sectionTitle}>Leave History</Text>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filtersScroll}
+                contentContainerStyle={styles.filtersContent}
+              >
+                {(['ALL', 'PENDING', 'APPROVED', 'REJECTED'] as const).map((filter) => {
+                  const isActive = statusFilter === filter;
+                  return (
+                    <TouchableOpacity
+                      key={filter}
+                      style={[styles.filterChip, isActive && styles.filterChipActive]}
+                      onPress={() => setStatusFilter(filter)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                        {filter.charAt(0) + filter.slice(1).toLowerCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </>
-          )}
-          renderItem={renderHistory}
-          contentContainerStyle={{ padding: 15 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>No leave requests found.</Text>}
+          }
+          renderItem={renderHistoryItem}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconCircle}>
+                <Ionicons name="calendar-outline" size={32} color="#94A3B8" />
+              </View>
+              <Text style={styles.emptyTitle}>No Leave Requests</Text>
+              <Text style={styles.emptySubtitle}>
+                {statusFilter === 'ALL'
+                  ? "You haven't submitted any leave requests yet."
+                  : `No requests with status "${statusFilter}".`}
+              </Text>
+            </View>
+          }
         />
       )}
 
       {/* Apply Leave Modal */}
       <Modal visible={showApplyModal} animationType="slide" transparent>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Apply for Leave</Text>
-            
-            <Text style={styles.label}>Start Date (YYYY-MM-DD)</Text>
-            <TextInput style={styles.input} value={startDate} onChangeText={setStartDate} />
-            
-            <Text style={styles.label}>End Date (YYYY-MM-DD)</Text>
-            <TextInput style={styles.input} value={endDate} onChangeText={setEndDate} />
-            
-            <Text style={styles.label}>Reason</Text>
-            <TextInput style={styles.input} value={reason} onChangeText={setReason} multiline />
-            
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setShowApplyModal(false)}>
-                <Text style={styles.closeBtnText}>CANCEL</Text>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Request Time Off</Text>
+                <Text style={styles.modalSubtitle}>Fill details below for approval</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowApplyModal(false)}
+                style={styles.modalCloseBtn}
+              >
+                <Ionicons name="close" size={20} color="#64748B" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.submitBtn} onPress={handleApply} disabled={applying}>
-                {applying ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitBtnText}>SUBMIT</Text>}
+            </View>
+
+            <ScrollView style={styles.modalScroll}>
+              {/* Balance Summary in Modal */}
+              <View style={styles.modalBalanceInfo}>
+                <Ionicons name="information-circle-outline" size={16} color="#2563EB" />
+                <Text style={styles.modalBalanceText}>
+                  Available Balance: <Text style={{ fontWeight: '700' }}>{availableBalance} day(s)</Text>
+                </Text>
+              </View>
+
+              {/* Date Selectors */}
+              <View style={styles.dateRow}>
+                <View style={styles.dateCol}>
+                  <Text style={styles.fieldLabel}>Start Date</Text>
+                  <TouchableOpacity
+                    style={styles.datePickerButton}
+                    onPress={() => setShowStartPicker(true)}
+                  >
+                    <Ionicons name="calendar-outline" size={16} color="#2563EB" style={{ marginRight: 6 }} />
+                    <Text style={styles.datePickerText}>{formatDateDisplay(startDate)}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.dateCol}>
+                  <Text style={styles.fieldLabel}>End Date</Text>
+                  <TouchableOpacity
+                    style={styles.datePickerButton}
+                    onPress={() => setShowEndPicker(true)}
+                  >
+                    <Ionicons name="calendar-outline" size={16} color="#2563EB" style={{ marginRight: 6 }} />
+                    <Text style={styles.datePickerText}>{formatDateDisplay(endDate)}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Duration Notice */}
+              <View style={styles.durationNotice}>
+                <Text style={styles.durationNoticeLabel}>Total Requested Days:</Text>
+                <Text style={styles.durationNoticeValue}>
+                  {requestedDays} {requestedDays === 1 ? 'Day' : 'Days'}
+                </Text>
+              </View>
+
+              {isLwpRequired && (
+                <View style={styles.lwpNotice}>
+                  <Ionicons name="alert-circle" size={16} color="#D97706" style={{ marginRight: 6 }} />
+                  <Text style={styles.lwpNoticeText}>
+                    Exceeds balance by {lwpDays} day(s). These will be marked as Leave Without Pay.
+                  </Text>
+                </View>
+              )}
+
+              {/* Reason */}
+              <View style={{ marginTop: 14 }}>
+                <Text style={styles.fieldLabel}>Reason for Absence *</Text>
+                <TextInput
+                  style={styles.reasonInput}
+                  placeholder="Provide reason for leave (medical, vacation, personal, etc.)..."
+                  placeholderTextColor="#94A3B8"
+                  value={reason}
+                  onChangeText={setReason}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              {/* DateTimePickers */}
+              {showStartPicker && (
+                <DateTimePicker
+                  value={startDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={(_e: any, date?: Date) => {
+                    setShowStartPicker(false);
+                    if (date) {
+                      setStartDate(date);
+                      if (date > endDate) setEndDate(date);
+                    }
+                  }}
+                />
+              )}
+
+              {showEndPicker && (
+                <DateTimePicker
+                  value={endDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  minimumDate={startDate}
+                  onChange={(_e: any, date?: Date) => {
+                    setShowEndPicker(false);
+                    if (date) setEndDate(date);
+                  }}
+                />
+              )}
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowApplyModal(false)}
+                disabled={applying}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, applying && { opacity: 0.7 }]}
+                onPress={handleApply}
+                disabled={applying}
+              >
+                {applying ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+                    <Text style={styles.modalSubmitText}>Submit Request</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -207,42 +517,457 @@ export default function LeaveScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6f8' },
-  header: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginVertical: 15 },
-  balancesContainer: { marginBottom: 15 },
-  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 10, color: '#333' },
-  dashboardCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 3, shadowOffset: { width: 0, height: 2 } },
-  balanceGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginBottom: 10 },
-  balanceItem: { width: '30%', alignItems: 'center', marginBottom: 15 },
-  balanceLabel: { fontSize: 12, color: '#666', marginBottom: 5 },
-  balanceValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-  footerRow: { borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 10, alignItems: 'center' },
-  footerText: { fontSize: 12, color: '#888' },
-  notEligibleText: { textAlign: 'center', color: '#dc3545', marginVertical: 10 },
-  applyBtn: { backgroundColor: '#007BFF', padding: 15, borderRadius: 10, alignItems: 'center', marginBottom: 20 },
-  applyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  historyCard: { backgroundColor: '#fff', padding: 15, borderRadius: 10, marginBottom: 10, elevation: 1 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 5 },
-  histDates: { fontSize: 15, fontWeight: '600' },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, fontSize: 12, fontWeight: 'bold', overflow: 'hidden' },
-  badgeApproved: { backgroundColor: '#d4edda', color: '#155724' },
-  badgePending: { backgroundColor: '#fff3cd', color: '#856404' },
-  badgeRejected: { backgroundColor: '#f8d7da', color: '#721c24' },
-  badgeDefault: { backgroundColor: '#e2e3e5', color: '#383d41' },
-  histType: { fontSize: 14, color: '#666', marginBottom: 5 },
-  histReason: { fontSize: 14, color: '#333' },
-  cancelBtn: { marginTop: 10, alignSelf: 'flex-start' },
-  cancelBtnText: { color: '#dc3545', fontWeight: '600' },
-  emptyText: { textAlign: 'center', color: '#888', marginTop: 20 },
-  
-  modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#fff', padding: 20, borderRadius: 10 },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 15 },
-  label: { fontSize: 14, color: '#555', marginBottom: 5 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 5, padding: 10, marginBottom: 15 },
-  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 },
-  closeBtn: { padding: 10, marginRight: 10 },
-  closeBtnText: { color: '#666', fontWeight: 'bold' },
-  submitBtn: { padding: 10, backgroundColor: '#007BFF', borderRadius: 5, minWidth: 80, alignItems: 'center' },
-  submitBtnText: { color: '#fff', fontWeight: 'bold' }
+  container: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 10) : 0,
+  },
+  topHeader: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#0F172A',
+    letterSpacing: -0.3,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 10,
+  },
+  listContent: {
+    padding: 16,
+    paddingBottom: 30,
+  },
+  balanceSummaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 14,
+  },
+  balanceMainRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  balanceCardLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+  },
+  balanceNumberRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginTop: 4,
+  },
+  balanceBigNumber: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: '#2563EB',
+  },
+  balanceUnit: {
+    fontSize: 14,
+    color: '#64748B',
+    marginLeft: 6,
+    fontWeight: '600',
+  },
+  balanceIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: '#EFF6FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  balanceGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  balanceGridItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  balanceGridDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E2E8F0',
+  },
+  gridLabel: {
+    fontSize: 11,
+    color: '#64748B',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  gridValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  applyButton: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 3,
+    marginBottom: 20,
+  },
+  applyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  historySectionHeader: {
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  filtersScroll: {
+    marginBottom: 12,
+  },
+  filtersContent: {
+    gap: 8,
+    flexDirection: 'row',
+  },
+  filterChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  filterChipActive: {
+    backgroundColor: '#2563EB',
+    borderColor: '#2563EB',
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+  },
+  historyCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: 10,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  leaveTypeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  leaveTypeTagText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  cardDatesRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardDatesText: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: '#1E293B',
+    flex: 1,
+  },
+  daysPill: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  daysPillText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  reasonBox: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 8,
+    marginTop: 2,
+  },
+  reasonText: {
+    fontSize: 12.5,
+    color: '#64748B',
+    fontStyle: 'italic',
+  },
+  cardFooterRow: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  cancelButtonText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  emptyIconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  emptyTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  emptySubtitle: {
+    fontSize: 12.5,
+    color: '#94A3B8',
+    textAlign: 'center',
+    marginTop: 4,
+    maxWidth: 240,
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  modalSubtitle: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalScroll: {
+    marginBottom: 14,
+  },
+  modalBalanceInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EFF6FF',
+    padding: 10,
+    borderRadius: 8,
+    marginBottom: 14,
+  },
+  modalBalanceText: {
+    fontSize: 12.5,
+    color: '#1E40AF',
+  },
+  dateRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  dateCol: {
+    flex: 1,
+  },
+  fieldLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  datePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: '#F8FAFC',
+  },
+  datePickerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  durationNotice: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+  },
+  durationNoticeLabel: {
+    fontSize: 12.5,
+    color: '#475569',
+    fontWeight: '500',
+  },
+  durationNoticeValue: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  lwpNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  lwpNoticeText: {
+    fontSize: 12,
+    color: '#B45309',
+    flex: 1,
+  },
+  reasonInput: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 13,
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+    minHeight: 70,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  modalSubmitBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalSubmitText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });

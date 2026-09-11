@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.notificationStream = exports.registerPushToken = exports.updatePreferences = exports.getPreferences = exports.deleteNotification = exports.markAllAsRead = exports.markAsRead = exports.getUnreadNotifications = exports.getNotifications = void 0;
+exports.broadcastAnnouncement = exports.notificationStream = exports.registerPushToken = exports.updatePreferences = exports.getPreferences = exports.deleteNotification = exports.markAllAsRead = exports.markAsRead = exports.getUnreadNotifications = exports.getNotifications = void 0;
 const zod_1 = require("zod");
 const db_1 = require("../db");
 const notificationService_1 = require("../services/notificationService");
@@ -81,6 +81,13 @@ const getNotifications = async (req, res) => {
         // Count total matching
         const countRes = await (0, db_1.query)(`SELECT COUNT(*) as total FROM notifications ${filterQuery}`, queryParams);
         const total = parseInt(countRes.rows[0].total) || 0;
+        // Unread count for current user
+        const unreadCountRes = await (0, db_1.query)(`SELECT COUNT(*) as unread_count 
+       FROM notifications 
+       WHERE deleted_at IS NULL 
+         AND is_read = FALSE 
+         AND (recipient_user_id = $1 OR (role = $2 AND recipient_user_id IS NULL))`, [userId, userRole]);
+        const unreadCount = parseInt(unreadCountRes.rows[0].unread_count) || 0;
         // Fetch paginated rows
         const itemsRes = await (0, db_1.query)(`SELECT id, recipient_user_id as "recipientUserId", sender_user_id as "senderUserId",
               role, title, message, type, priority, action_url as "actionUrl", icon,
@@ -99,6 +106,7 @@ const getNotifications = async (req, res) => {
                     total,
                     totalPages: Math.ceil(total / limit) || 1,
                 },
+                unreadCount,
             },
         });
     }
@@ -110,7 +118,7 @@ const getNotifications = async (req, res) => {
 exports.getNotifications = getNotifications;
 /**
  * GET /api/notifications/unread
- * Returns unread count and latest 5 unread notifications for the header bell dropdown
+ * Returns unread count and latest unread/recent notifications for the header bell dropdown
  */
 const getUnreadNotifications = async (req, res) => {
     try {
@@ -123,7 +131,7 @@ const getUnreadNotifications = async (req, res) => {
          AND is_read = FALSE 
          AND (recipient_user_id = $1 OR (role = $2 AND recipient_user_id IS NULL))`, [userId, userRole]);
         const count = parseInt(countRes.rows[0].unread_count) || 0;
-        // Latest 5 notifications for dropdown
+        // Latest 10 notifications for dropdown
         const latestRes = await (0, db_1.query)(`SELECT id, recipient_user_id as "recipientUserId", role, title, message, 
               type, priority, action_url as "actionUrl", icon, is_read as "isRead", 
               created_at as "createdAt"
@@ -131,12 +139,13 @@ const getUnreadNotifications = async (req, res) => {
        WHERE deleted_at IS NULL 
          AND (recipient_user_id = $1 OR (role = $2 AND recipient_user_id IS NULL))
        ORDER BY created_at DESC
-       LIMIT 6`, [userId, userRole]);
+       LIMIT 10`, [userId, userRole]);
         res.json({
             success: true,
             data: {
                 unreadCount: count,
                 latest: latestRes.rows,
+                items: latestRes.rows,
             },
         });
     }
@@ -372,3 +381,46 @@ const notificationStream = (req, res) => {
     notificationService_1.NotificationService.registerSSEClient(userId, res);
 };
 exports.notificationStream = notificationStream;
+const broadcastSchema = zod_1.z.object({
+    title: zod_1.z.string().optional().default('📢 Company Announcement'),
+    message: zod_1.z.string().min(3, 'Announcement message is required'),
+    priority: zod_1.z.enum(['Low', 'Medium', 'High', 'Critical']).optional().default('High'),
+    target: zod_1.z.enum(['all', 'employee', 'admin']).optional().default('employee'),
+});
+/**
+ * POST /api/notifications/broadcast
+ * Broadcast company announcement to employees (Admin only)
+ */
+const broadcastAnnouncement = async (req, res) => {
+    try {
+        if (req.user.role?.toLowerCase() !== 'admin') {
+            res.status(403).json({ success: false, error: { message: 'Only administrators can broadcast announcements' } });
+            return;
+        }
+        const parsed = broadcastSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ success: false, error: { message: parsed.error.issues[0].message } });
+            return;
+        }
+        const { title, message, priority, target } = parsed.data;
+        const result = await notificationService_1.NotificationService.send({
+            role: target,
+            senderUserId: req.user.id,
+            title: title || '📢 Company Announcement',
+            message,
+            type: 'Announcement',
+            priority: priority,
+            actionUrl: '/notifications',
+        });
+        res.json({
+            success: true,
+            message: 'Announcement broadcasted successfully',
+            data: { count: result.count },
+        });
+    }
+    catch (error) {
+        console.error('broadcastAnnouncement error:', error);
+        res.status(500).json({ success: false, error: { message: 'Failed to broadcast announcement' } });
+    }
+};
+exports.broadcastAnnouncement = broadcastAnnouncement;

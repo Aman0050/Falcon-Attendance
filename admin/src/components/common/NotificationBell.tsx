@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import NotificationPreferencesModal from './NotificationPreferencesModal';
 
 export interface NotificationItem {
   id: number;
@@ -41,6 +42,7 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [dropdownOpen, setDropdownOpen] = useState<boolean>(false);
+  const [showPrefModal, setShowPrefModal] = useState<boolean>(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const pollingTimerRef = useRef<any>(null);
 
@@ -116,11 +118,10 @@ export default function NotificationBell() {
       const res = await axios.get(`${API_BASE}/api/notifications/unread`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.data.success) {
-        setUnreadCount(res.data.data.unreadCount || 0);
-        if (res.data.data.items) {
-          setNotifications(res.data.data.items);
-        }
+      if (res.data?.success && res.data?.data) {
+        setUnreadCount(res.data.data.unreadCount ?? 0);
+        const list = res.data.data.items || res.data.data.latest || [];
+        setNotifications(list);
       }
     } catch (err) {
       // Quiet fail
@@ -226,6 +227,7 @@ export default function NotificationBell() {
   };
 
   return (
+    <>
     <Dropdown
       show={dropdownOpen}
       onToggle={(isOpen) => {
@@ -484,18 +486,29 @@ export default function NotificationBell() {
             <ChevronRight size={13} />
           </Link>
 
-          <Link
-            to="/notifications"
-            onClick={() => setDropdownOpen(false)}
-            className="text-muted text-decoration-none d-flex align-items-center gap-1"
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDropdownOpen(false);
+              setShowPrefModal(true);
+            }}
+            className="btn btn-link text-muted text-decoration-none d-flex align-items-center gap-1 p-0"
             style={{ fontSize: '11.5px' }}
-            title="Notification Settings"
+            title="Notification Preferences"
           >
             <Settings size={12} />
             <span>Preferences</span>
-          </Link>
+          </button>
         </div>
       </Dropdown.Menu>
     </Dropdown>
+
+    <NotificationPreferencesModal
+      show={showPrefModal}
+      onHide={() => setShowPrefModal(false)}
+    />
+    </>
   );
 }

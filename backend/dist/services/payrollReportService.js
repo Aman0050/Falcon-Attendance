@@ -8,6 +8,7 @@ const exceljs_1 = __importDefault(require("exceljs"));
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const db_1 = require("../db");
 const payrollCalculationService_1 = require("./payrollCalculationService");
+const logoHelper_1 = require("../utils/logoHelper");
 const thinBorder = {
     top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
     left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
@@ -143,22 +144,39 @@ class PayrollReportService {
         const sheet = workbook.addWorksheet(`Salary Register ${monthName} ${data.year}`, {
             views: [{ showGridLines: true }]
         });
-        // Row 1: Executive Brand Header
-        sheet.mergeCells('A1:R1');
-        const titleCell = sheet.getCell('A1');
+        // Row 1 to 2: Executive Brand Header with Company Logo
+        sheet.mergeCells('A1:A2');
+        const logoBuffer = (0, logoHelper_1.getCompanyLogoBuffer)();
+        if (logoBuffer) {
+            try {
+                const logoId = workbook.addImage({
+                    buffer: logoBuffer,
+                    extension: 'png'
+                });
+                sheet.addImage(logoId, {
+                    tl: { col: 0.1, row: 0.1 },
+                    ext: { width: 50, height: 50 }
+                });
+            }
+            catch (e) {
+                console.error('Logo add error in exportSalaryRegisterExcel:', e);
+            }
+        }
+        sheet.mergeCells('B1:R1');
+        const titleCell = sheet.getCell('B1');
         titleCell.value = 'FALCON INFO SOLUTIONS PVT. LTD.';
         titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
         titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E3B5C' } };
-        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(1).height = 32;
+        titleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(1).height = 30;
         // Row 2: Subtitle & Metadata
-        sheet.mergeCells('A2:R2');
-        const subCell = sheet.getCell('A2');
+        sheet.mergeCells('B2:R2');
+        const subCell = sheet.getCell('B2');
         subCell.value = `MONTHLY SALARY REGISTER — ${monthName.toUpperCase()} ${data.year}  |  STATUS: ${data.status}  |  GENERATED: ${new Date().toLocaleDateString('en-GB')}`;
         subCell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF0E3B5C' } };
         subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF4FA' } };
-        subCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(2).height = 22;
+        subCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(2).height = 24;
         // Row 3: Blank Spacing
         sheet.getRow(3).height = 8;
         // Row 4: Column Headers
@@ -345,22 +363,40 @@ class PayrollReportService {
         const sheet = workbook.addWorksheet(`PF Report ${monthName} ${data.year}`, {
             views: [{ showGridLines: true }]
         });
+        // Row 1 to 2: Brand Header with Company Logo
+        sheet.mergeCells('A1:A2');
+        const logoBuffer = (0, logoHelper_1.getCompanyLogoBuffer)();
+        if (logoBuffer) {
+            try {
+                const logoId = workbook.addImage({
+                    buffer: logoBuffer,
+                    extension: 'png'
+                });
+                sheet.addImage(logoId, {
+                    tl: { col: 0.1, row: 0.1 },
+                    ext: { width: 50, height: 50 }
+                });
+            }
+            catch (e) {
+                console.error('Logo add error in exportPFReportExcel:', e);
+            }
+        }
         // Row 1: Header
-        sheet.mergeCells('A1:G1');
-        const titleCell = sheet.getCell('A1');
+        sheet.mergeCells('B1:G1');
+        const titleCell = sheet.getCell('B1');
         titleCell.value = 'FALCON INFO SOLUTIONS PVT. LTD.';
         titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
         titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D9488' } }; // Teal
-        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(1).height = 32;
+        titleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(1).height = 30;
         // Row 2: Subtitle
-        sheet.mergeCells('A2:G2');
-        const subCell = sheet.getCell('A2');
+        sheet.mergeCells('B2:G2');
+        const subCell = sheet.getCell('B2');
         subCell.value = `EMPLOYEES' PROVIDENT FUND (EPF) MONTHLY RETURN — ${monthName.toUpperCase()} ${data.year}`;
         subCell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF0D9488' } };
         subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
-        subCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(2).height = 22;
+        subCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(2).height = 24;
         // Row 3: Blank
         sheet.getRow(3).height = 8;
         // Row 4: Column Headers
@@ -484,22 +520,40 @@ class PayrollReportService {
         const sheet = workbook.addWorksheet(`ESIC Report ${monthName} ${data.year}`, {
             views: [{ showGridLines: true }]
         });
+        // Row 1 to 2: Brand Header with Company Logo
+        sheet.mergeCells('A1:A2');
+        const logoBuffer = (0, logoHelper_1.getCompanyLogoBuffer)();
+        if (logoBuffer) {
+            try {
+                const logoId = workbook.addImage({
+                    buffer: logoBuffer,
+                    extension: 'png'
+                });
+                sheet.addImage(logoId, {
+                    tl: { col: 0.1, row: 0.1 },
+                    ext: { width: 50, height: 50 }
+                });
+            }
+            catch (e) {
+                console.error('Logo add error in exportESICReportExcel:', e);
+            }
+        }
         // Row 1: Header
-        sheet.mergeCells('A1:G1');
-        const titleCell = sheet.getCell('A1');
+        sheet.mergeCells('B1:G1');
+        const titleCell = sheet.getCell('B1');
         titleCell.value = 'FALCON INFO SOLUTIONS PVT. LTD.';
         titleCell.font = { name: 'Segoe UI', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
         titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9333EA' } }; // Purple
-        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(1).height = 32;
+        titleCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(1).height = 30;
         // Row 2: Subtitle
-        sheet.mergeCells('A2:G2');
-        const subCell = sheet.getCell('A2');
+        sheet.mergeCells('B2:G2');
+        const subCell = sheet.getCell('B2');
         subCell.value = `EMPLOYEES' STATE INSURANCE (ESIC) MONTHLY RETURN — ${monthName.toUpperCase()} ${data.year}`;
         subCell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF9333EA' } };
         subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFAF5FF' } };
-        subCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        sheet.getRow(2).height = 22;
+        subCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        sheet.getRow(2).height = 24;
         // Row 3: Blank
         sheet.getRow(3).height = 8;
         // Row 4: Column Headers
@@ -622,12 +676,24 @@ class PayrollReportService {
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename="Payroll_Summary_${data.month}_${data.year}.pdf"`);
         doc.pipe(res);
+        // Render company logo
+        const logoPath = (0, logoHelper_1.getCompanyLogoPath)();
+        let textStartX = 30;
+        if (logoPath) {
+            try {
+                doc.image(logoPath, 30, 20, { width: 44, height: 44 });
+                textStartX = 84;
+            }
+            catch (e) {
+                console.warn('Could not render logo in Payroll Summary PDF:', e);
+            }
+        }
         // Title banner
-        doc.fillColor('#0E3B5C').fontSize(15).font('Helvetica-Bold')
-            .text(`FALCON INFO SOLUTIONS PVT. LTD. — PAYROLL SUMMARY`, 30, 30);
+        doc.fillColor('#0E3B5C').fontSize(14).font('Helvetica-Bold')
+            .text(`FALCON INFO SOLUTIONS PVT. LTD. — PAYROLL SUMMARY`, textStartX, 25);
         doc.fillColor('#5A6B75').fontSize(9).font('Helvetica')
-            .text(`Period: ${monthName} ${data.year}  |  Status: ${data.status}  |  Total Working Days: ${data.total_working_days}  |  Generated on: ${new Date().toLocaleDateString('en-GB')}`, 30, 48);
-        let y = 70;
+            .text(`Period: ${monthName} ${data.year}  |  Status: ${data.status}  |  Total Working Days: ${data.total_working_days}  |  Generated on: ${new Date().toLocaleDateString('en-GB')}`, textStartX, 46);
+        let y = 72;
         doc.rect(30, y, 782, 22).fill('#0E3B5C');
         doc.fillColor('#FFFFFF').fontSize(8.5).font('Helvetica-Bold')
             .text('Emp Code', 35, y + 6, { width: 65 })

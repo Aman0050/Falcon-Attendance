@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getEmployees, updateEmployeeStatus, resetPassword, deleteEmployee, Employee } from '../../api/adminApi';
+import { getEmployees, updateEmployeeStatus, resetPassword, deleteEmployee, updateJobStatus, Employee } from '../../api/adminApi';
 
 export default function EmployeesScreen({ navigation }: any) {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -21,6 +21,30 @@ export default function EmployeesScreen({ navigation }: any) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleMarkPermanent = (id: number, name: string) => {
+    Alert.alert(
+      'Confirm Permanent Status',
+      `Mark ${name} as a Permanent employee? This will conclude their probation period.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm',
+          onPress: async () => {
+            try {
+              const res = await updateJobStatus(id, { jobStatus: 'Permanent' });
+              if (res.success) {
+                Alert.alert('Success', `${name} is now confirmed as Permanent.`);
+                fetchEmployees();
+              }
+            } catch (error: any) {
+              Alert.alert('Error', error.response?.data?.error?.message || 'Failed to update job status');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleToggleStatus = async (id: number, currentStatus: string) => {
@@ -89,19 +113,44 @@ export default function EmployeesScreen({ navigation }: any) {
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.name}>{item.name}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? '#d4edda' : '#f8d7da' }]}>
-          <Text style={[styles.statusText, { color: item.status === 'active' ? '#155724' : '#721c24' }]}>
-            {item.status.toUpperCase()}
-          </Text>
+        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          {item.jobStatus === 'Provisional' ? (
+            <View style={[styles.statusBadge, { backgroundColor: '#FEF3C7' }]}>
+              <Text style={[styles.statusText, { color: '#B45309' }]}>PROVISIONAL</Text>
+            </View>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: '#D1FAE5' }]}>
+              <Text style={[styles.statusText, { color: '#047857' }]}>PERMANENT</Text>
+            </View>
+          )}
+          <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? '#d4edda' : '#f8d7da' }]}>
+            <Text style={[styles.statusText, { color: item.status === 'active' ? '#155724' : '#721c24' }]}>
+              {item.status.toUpperCase()}
+            </Text>
+          </View>
         </View>
       </View>
       <Text style={styles.employeeIdText}>ID: {item.employeeId}</Text>
       <Text style={styles.detailText}>{item.email}</Text>
       <Text style={styles.detailText}>{item.role.toUpperCase()}</Text>
       {item.department && <Text style={styles.detailText}>{item.designation} - {item.department}</Text>}
+      {item.jobStatus === 'Provisional' && item.provisionalEndDate && (
+        <Text style={[styles.detailText, { color: '#B45309', fontWeight: '600', marginTop: 2 }]}>
+          Probation Ends: {item.provisionalEndDate}
+        </Text>
+      )}
       
       <View style={styles.cardActions}>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+          {item.jobStatus === 'Provisional' && (
+            <TouchableOpacity 
+              style={[styles.actionBtn, { borderColor: '#10B981' }]}
+              onPress={() => handleMarkPermanent(item.id, item.name)}
+            >
+              <Ionicons name="checkmark-done-circle-outline" size={16} color="#10B981" />
+              <Text style={[styles.actionBtnText, { color: '#10B981' }]}>Permanent</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity 
             style={styles.actionBtn}
             onPress={() => handleResetPassword(item.id)}

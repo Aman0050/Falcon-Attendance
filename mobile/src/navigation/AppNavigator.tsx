@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/LoginScreen';
 import TabNavigator from './TabNavigator';
@@ -9,6 +10,15 @@ const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
   const { token, isLoading } = useAuth();
+
+  useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      console.log('[Push Notification Tapped]:', response.notification.request.content.title, data);
+    });
+
+    return () => sub.remove();
+  }, []);
 
   if (isLoading) {
     return (

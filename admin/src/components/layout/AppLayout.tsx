@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Offcanvas, Dropdown } from 'react-bootstrap';
 import {
   LayoutDashboard,
@@ -16,7 +16,8 @@ import {
   Calendar,
   User,
   ChevronDown,
-  Briefcase
+  Briefcase,
+  ArrowLeft
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import Avatar from '../common/Avatar';
@@ -24,16 +25,23 @@ import NotificationBell from '../common/NotificationBell';
 import './Layout.css';
 
 export default function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, activeView, setActiveView, isDualRole } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
-  const isAdmin = user?.role?.toLowerCase() === 'admin';
+  const isAdmin = activeView === 'admin';
+
+  const handleSwitchView = (targetView: 'admin' | 'employee') => {
+    setActiveView(targetView);
+    navigate('/dashboard');
+  };
 
   const adminLinks = [
     { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard },
     { name: 'Employees', path: '/employees', icon: Users },
     { name: 'Attendance', path: '/attendance', icon: CalendarCheck },
+    { name: 'My Attendance', path: '/my-attendance', icon: UserCheck },
     { name: 'Leave Management', path: '/leave', icon: CalendarRange },
     { name: 'Payroll', path: '/payroll', icon: Briefcase },
     { name: 'Reports', path: '/reports', icon: FileBarChart },
@@ -117,7 +125,7 @@ export default function AppLayout() {
             {user?.name || 'User'}
           </div>
           <div className="sidebar-user-role">
-            {isAdmin ? 'Administrator' : 'Employee'}
+            {isDualRole ? (isAdmin ? 'Admin (Dual Role)' : 'Employee (Dual Role)') : (isAdmin ? 'Administrator' : 'Employee')}
           </div>
         </div>
         <button
@@ -167,6 +175,26 @@ export default function AppLayout() {
             <span className="fw-bold fs-6">Falcon Portal</span>
           </div>
           <div className="d-flex align-items-center gap-2">
+            {isDualRole && (
+              <button
+                type="button"
+                onClick={() => handleSwitchView(isAdmin ? 'employee' : 'admin')}
+                className={`btn-view-switch btn-view-switch-mobile ${isAdmin ? 'admin-to-emp' : 'emp-to-admin'}`}
+                title={isAdmin ? 'Switch to Employee View' : 'Back to Admin'}
+              >
+                {isAdmin ? (
+                  <>
+                    <UserCheck size={12} />
+                    <span>Employee</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowLeft size={12} />
+                    <span>Admin</span>
+                  </>
+                )}
+              </button>
+            )}
             <NotificationBell />
             <Avatar
               src={user?.profilePhotoUrl || user?.profile_photo_url}
@@ -188,6 +216,27 @@ export default function AppLayout() {
           </div>
 
           <div className="d-flex align-items-center gap-3">
+            {isDualRole && (
+              <button
+                type="button"
+                onClick={() => handleSwitchView(isAdmin ? 'employee' : 'admin')}
+                className={`btn-view-switch ${isAdmin ? 'admin-to-emp' : 'emp-to-admin'}`}
+                title={isAdmin ? 'Switch to Employee View' : 'Back to Admin'}
+              >
+                {isAdmin ? (
+                  <>
+                    <UserCheck size={14} />
+                    <span>Employee View</span>
+                  </>
+                ) : (
+                  <>
+                    <ArrowLeft size={14} />
+                    <span>Back to Admin</span>
+                  </>
+                )}
+              </button>
+            )}
+
             <div className="top-nav-date-badge">
               <Calendar size={14} className="text-primary" />
               <span>{formattedDate}</span>
@@ -251,7 +300,7 @@ export default function AppLayout() {
                             letterSpacing: '0.02em',
                           }}
                         >
-                          {isAdmin ? 'ADMIN' : 'STAFF'}
+                          {isDualRole ? (isAdmin ? 'ADMIN (DUAL)' : 'STAFF (DUAL)') : (isAdmin ? 'ADMIN' : 'STAFF')}
                         </span>
                       </div>
                       <div className="text-muted text-truncate" style={{ fontSize: '12px' }}>
@@ -260,6 +309,25 @@ export default function AppLayout() {
                     </div>
                   </div>
                 </div>
+
+                {isDualRole && (
+                  <>
+                    <div className="px-2 pt-1 pb-1 text-uppercase fw-bold text-muted" style={{ fontSize: '10.5px', letterSpacing: '0.06em' }}>
+                      Role Switcher
+                    </div>
+                    <Dropdown.Item
+                      onClick={() => handleSwitchView(isAdmin ? 'employee' : 'admin')}
+                      className="top-nav-menu-item d-flex align-items-center justify-content-between"
+                      style={{ color: '#2563EB', fontWeight: 600 }}
+                    >
+                      <div className="d-flex align-items-center gap-2.5">
+                        {isAdmin ? <UserCheck size={15} /> : <ArrowLeft size={15} />}
+                        <span>{isAdmin ? 'Switch to Employee View' : 'Back to Admin'}</span>
+                      </div>
+                    </Dropdown.Item>
+                    <div style={{ height: '1px', background: '#E2E8F0', margin: '6px 0' }} />
+                  </>
+                )}
 
                 <div className="px-2 pt-1 pb-1 text-uppercase fw-bold text-muted" style={{ fontSize: '10.5px', letterSpacing: '0.06em' }}>
                   Account

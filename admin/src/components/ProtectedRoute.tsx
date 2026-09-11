@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, getUserRoles } from '../context/AuthContext';
 import { Container, Spinner } from 'react-bootstrap';
 
 interface ProtectedRouteProps {
@@ -22,9 +22,13 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role?.toLowerCase() || '')) {
-    // If authenticated but unauthorized role, send to their respective dashboard
-    return <Navigate to="/dashboard" replace />;
+  if (allowedRoles && allowedRoles.length > 0) {
+    const userRoles = getUserRoles(user);
+    const hasAccess = allowedRoles.some((role) => userRoles.includes(role.toLowerCase()));
+    if (!hasAccess) {
+      // If authenticated but unauthorized role, send to their respective dashboard
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <Outlet />;

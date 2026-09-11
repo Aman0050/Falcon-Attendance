@@ -6,6 +6,7 @@ import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import { getCompanyLogoBuffer, getCompanyLogoPath } from '../utils/logoHelper';
 
 export const getAttendanceReport = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -333,29 +334,20 @@ async function exportExcel(res: Response, summary: any, employeeReports: any[], 
   sheet.getRow(4).height = 18;
   sheet.getRow(5).height = 14;
 
-  // Attempt to add logo cleanly in Column A without overlapping any text
-  const possibleLogoPaths = [
-    path.join(process.cwd(), '../mobile/assets/logo.png'),
-    path.join(process.cwd(), '../admin/public/logo.png'),
-    path.join(process.cwd(), 'assets/logo.png'),
-    path.join(process.cwd(), 'public/logo.png')
-  ];
-
-  for (const lp of possibleLogoPaths) {
-    if (fs.existsSync(lp)) {
-      try {
-        const logoId = workbook.addImage({
-          buffer: fs.readFileSync(lp) as any,
-          extension: 'png'
-        });
-        sheet.addImage(logoId, {
-          tl: { col: 0.15, row: 1.1 },
-          ext: { width: 56, height: 56 }
-        });
-        break;
-      } catch (e) {
-        console.error('Logo add error', e);
-      }
+  // Add company logo cleanly in Column A without overlapping any text
+  const logoBuffer = getCompanyLogoBuffer();
+  if (logoBuffer) {
+    try {
+      const logoId = workbook.addImage({
+        buffer: logoBuffer as any,
+        extension: 'png'
+      });
+      sheet.addImage(logoId, {
+        tl: { col: 0.15, row: 1.1 },
+        ext: { width: 56, height: 56 }
+      });
+    } catch (e) {
+      console.error('Logo add error in exportExcel:', e);
     }
   }
 
@@ -546,21 +538,14 @@ async function exportPdf(res: Response, summary: any, employeeReports: any[], fr
     doc.rect(0, 0, pageWidth, 5).fill('#1E3A8A');
 
     // Company logo
-    const possibleLogoPaths = [
-      path.join(process.cwd(), '../mobile/assets/logo.png'),
-      path.join(process.cwd(), '../admin/public/logo.png'),
-      path.join(process.cwd(), 'assets/logo.png'),
-      path.join(process.cwd(), 'public/logo.png')
-    ];
-
+    const logoPath = getCompanyLogoPath();
     let logoX = 36;
-    for (const lp of possibleLogoPaths) {
-      if (fs.existsSync(lp)) {
-        try {
-          doc.image(lp, 36, 20, { width: 44, height: 44 });
-          logoX = 88;
-          break;
-        } catch (e) {}
+    if (logoPath) {
+      try {
+        doc.image(logoPath, 36, 18, { width: 44, height: 44 });
+        logoX = 88;
+      } catch (e) {
+        console.error('Logo add error in exportPdf:', e);
       }
     }
 

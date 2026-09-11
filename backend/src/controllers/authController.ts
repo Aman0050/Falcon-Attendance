@@ -45,15 +45,28 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const rawRoles = user.roles;
+    const roles: string[] = Array.isArray(rawRoles)
+      ? rawRoles.map((r: any) => String(r).toLowerCase())
+      : [String(user.role || 'employee').toLowerCase()];
+
     const token = jwt.sign(
-      { id: user.id, employee_id: user.employee_id, role: user.role },
+      { id: user.id, employee_id: user.employee_id, role: user.role, roles },
       JWT_SECRET,
       { expiresIn: '7d' }
     );
 
     // Don't send the password hash back
     const { password_hash, ...userWithoutPassword } = user;
-    (userWithoutPassword as any).profilePhotoUrl = user.profile_photo_url;
+    let photoUrl = user.profile_photo_url;
+    if (photoUrl && typeof photoUrl === 'string' && photoUrl.startsWith('/')) {
+      const host = req.get('host');
+      if (host) {
+        photoUrl = `${req.protocol}://${host}${photoUrl}`;
+      }
+    }
+    (userWithoutPassword as any).profilePhotoUrl = photoUrl;
+    (userWithoutPassword as any).roles = roles;
 
     res.json({
       message: 'Login successful',
@@ -67,20 +80,18 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 };
 
 export const logout = async (req: Request, res: Response): Promise<void> => {
-  // In a stateless JWT setup, client deletes the token. 
-  // For added security, we could implement a token blocklist here.
   res.json({ message: 'Logout successful' });
 };
 
 export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      res.status(401).json({ error: 'Not authenticated' });
+      res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
     const result = await query(
-      `SELECT id, employee_id, name, email, phone, role, status, profile_photo_url, profile_photo_url as "profilePhotoUrl", created_at FROM users WHERE id = $1`,
+      `SELECT id, employee_id, name, email, phone, role, roles, status, profile_photo_url, profile_photo_url as "profilePhotoUrl", created_at FROM users WHERE id = $1`,
       [req.user.id]
     );
 
@@ -89,7 +100,20 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    res.json({ user: result.rows[0] });
+    const dbUser = result.rows[0];
+    const rawRoles = dbUser.roles;
+    dbUser.roles = Array.isArray(rawRoles)
+      ? rawRoles.map((r: any) => String(r).toLowerCase())
+      : [String(dbUser.role || 'employee').toLowerCase()];
+
+    if (dbUser.profilePhotoUrl && typeof dbUser.profilePhotoUrl === 'string' && dbUser.profilePhotoUrl.startsWith('/')) {
+      const host = req.get('host');
+      if (host) {
+        dbUser.profilePhotoUrl = `${req.protocol}://${host}${dbUser.profilePhotoUrl}`;
+      }
+    }
+
+    res.json({ user: dbUser });
   } catch (error) {
     console.error('getMe error:', error);
     res.status(500).json({ error: 'Internal server error' });

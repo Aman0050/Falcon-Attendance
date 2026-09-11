@@ -15,6 +15,9 @@ export interface Employee {
   role: 'admin' | 'employee';
   status: 'active' | 'inactive';
   joiningDate: string | null;
+  jobStatus?: 'Provisional' | 'Permanent';
+  provisionalStartDate?: string | null;
+  provisionalEndDate?: string | null;
 }
 
 const getAuthHeaders = async () => {
@@ -39,6 +42,12 @@ export const createEmployee = async (employeeData: any) => {
 export const updateEmployeeStatus = async (id: number, status: 'active' | 'inactive') => {
   const headers = await getAuthHeaders();
   const response = await axios.patch(`${API_URL}/api/admin/employees/${id}/status`, { status }, { headers });
+  return response.data;
+};
+
+export const updateJobStatus = async (id: number, data: { jobStatus: 'Provisional' | 'Permanent'; provisionalEndDate?: string; provisionalStartDate?: string; reason?: string }) => {
+  const headers = await getAuthHeaders();
+  const response = await axios.patch(`${API_URL}/api/admin/employees/${id}/job-status`, data, { headers });
   return response.data;
 };
 

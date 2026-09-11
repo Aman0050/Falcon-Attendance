@@ -197,12 +197,16 @@ const approveLeave = async (req, res) => {
         await client.query('COMMIT');
         // Notify employee of approval
         try {
+            const fromDateObj = new Date(lr.from_date);
+            const formattedDate = !isNaN(fromDateObj.getTime())
+                ? fromDateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Kolkata' })
+                : lr.from_date;
             await notificationService_1.NotificationService.notifyUser(lr.employee_id, {
-                title: 'Leave Request Approved',
-                message: `Your ${lr.leave_type} request for ${new Date(lr.from_date).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })} (${lr.days} day(s)) has been approved.`,
+                title: '🎉 Leave Approved',
+                message: `Your leave request for ${formattedDate} has been approved.`,
                 type: 'Leave',
                 priority: 'High',
-                actionUrl: '/my-leave',
+                actionUrl: '/leave',
             });
         }
         catch (notifErr) {

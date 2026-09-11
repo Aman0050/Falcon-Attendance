@@ -26,9 +26,35 @@ const createEmployeeSchema = z.object({
       return v.substring(0, 10);
     }),
   role: z.enum(['employee', 'admin']).default('employee'),
+  roles: z.array(z.enum(['employee', 'admin'])).min(1).optional(),
   customEmployeeId: z.string().max(50).optional(),
   password: z.string().min(6).max(100).optional(),
   profilePhotoUrl: z.string().nullable().optional(),
+  jobStatus: z.enum(['Provisional', 'Permanent']).default('Permanent'),
+  provisionalStartDate: z
+    .union([
+      z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Invalid date format'),
+      z.literal(''),
+      z.null()
+    ])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (!v || v === '') return null;
+      return v.substring(0, 10);
+    }),
+  provisionalEndDate: z
+    .union([
+      z.string().regex(/^\d{4}-\d{2}-\d{2}/, 'Invalid date format'),
+      z.literal(''),
+      z.null()
+    ])
+    .optional()
+    .transform((v) => {
+      if (v === undefined) return undefined;
+      if (!v || v === '') return null;
+      return v.substring(0, 10);
+    }),
 });
 
 const editEmployeeSchema = createEmployeeSchema.partial();
@@ -45,6 +71,7 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
     const department = req.query.department as string;
     const status = req.query.status as string;
     const role = req.query.role as string;
+    const jobStatus = req.query.jobStatus as string;
 
     let filterQuery = 'WHERE 1=1';
     const queryParams: any[] = [];
@@ -63,7 +90,11 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
     }
     if (role && role !== 'All') {
       queryParams.push(role.toLowerCase());
-      filterQuery += ` AND role = $${queryParams.length}`;
+      filterQuery += ` AND (role = $${queryParams.length} OR roles @> jsonb_build_array($${queryParams.length}::text))`;
+    }
+    if (jobStatus && jobStatus !== 'All') {
+      queryParams.push(jobStatus);
+      filterQuery += ` AND job_status = $${queryParams.length}`;
     }
 
     const countRes = await query(`SELECT COUNT(*) FROM users ${filterQuery}`, queryParams);
@@ -71,7 +102,11 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
 
     const usersRes = await query(`
       SELECT id, employee_id as "employeeId", name, email, phone, department, 
-             designation, joining_date as "joiningDate", status, role, profile_photo_url as "profilePhotoUrl", created_at as "createdAt"
+             designation, joining_date as "joiningDate", status, role, roles,
+             COALESCE(job_status, 'Permanent') as "jobStatus",
+             provisional_start_date as "provisionalStartDate",
+             provisional_end_date as "provisionalEndDate",
+             profile_photo_url as "profilePhotoUrl", created_at as "createdAt"
       FROM users
       ${filterQuery}
       ORDER BY id DESC
@@ -82,6 +117,13 @@ export const getEmployees = async (req: AuthRequest, res: Response): Promise<voi
       if (rec.joiningDate) {
         rec.joiningDate = new Date(rec.joiningDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
       }
+      if (rec.provisionalStartDate) {
+        rec.provisionalStartDate = new Date(rec.provisionalStartDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      }
+      if (rec.provisionalEndDate) {
+        rec.provisionalEndDate = new Date(rec.provisionalEndDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      }
+      rec.roles = Array.isArray(rec.roles) ? rec.roles : [rec.role || 'employee'];
       return rec;
     });
 
@@ -103,7 +145,11 @@ export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promis
     const id = parseInt(req.params.id as string);
     const userRes = await query(`
       SELECT id, employee_id as "employeeId", name, email, phone, department, 
-             designation, joining_date as "joiningDate", status, role, profile_photo_url as "profilePhotoUrl"
+             designation, joining_date as "joiningDate", status, role, roles,
+             COALESCE(job_status, 'Permanent') as "jobStatus",
+             provisional_start_date as "provisionalStartDate",
+             provisional_end_date as "provisionalEndDate",
+             profile_photo_url as "profilePhotoUrl"
       FROM users WHERE id = $1
     `, [id]);
 
@@ -113,8 +159,22 @@ export const getEmployeeDetail = async (req: AuthRequest, res: Response): Promis
     }
 
     const profile = userRes.rows[0];
+    profile.roles = Array.isArray(profile.roles) ? profile.roles : [profile.role || 'employee'];
     if (profile.joiningDate) {
       profile.joiningDate = new Date(profile.joiningDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    }
+    if (profile.provisionalStartDate) {
+      profile.provisionalStartDate = new Date(profile.provisionalStartDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    }
+    if (profile.provisionalEndDate) {
+      profile.provisionalEndDate = new Date(profile.provisionalEndDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+      
+      const today = new Date();
+      const end = new Date(profile.provisionalEndDate);
+      const diffTime = end.getTime() - today.getTime();
+      profile.daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    } else {
+      profile.daysRemaining = null;
     }
 
     const year = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).substring(0, 4);
@@ -184,7 +244,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const { name, email, phone, department, designation, joiningDate, role, customEmployeeId, password, profilePhotoUrl } = parsed.data;
+    const { name, email, phone, department, designation, joiningDate, role, roles, customEmployeeId, password, profilePhotoUrl, jobStatus, provisionalStartDate, provisionalEndDate } = parsed.data;
 
     // Check email
     const emailRes = await client.query(`SELECT id FROM users WHERE email = $1`, [email]);
@@ -215,12 +275,25 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
     const tempPassword = password || crypto.randomBytes(6).toString('hex');
     const hashed = await bcrypt.hash(tempPassword, 10);
 
+    const userRoles = (roles && roles.length > 0) ? Array.from(new Set(roles.map(r => r.toLowerCase()))) : [role ? role.toLowerCase() : 'employee'];
+    const primaryRole = userRoles.includes('admin') ? 'admin' : 'employee';
+
     const insertQuery = `
-      INSERT INTO users (employee_id, name, email, phone, department, designation, joining_date, role, password_hash, status, profile_photo_url)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10)
-      RETURNING id, employee_id as "employeeId", profile_photo_url as "profilePhotoUrl"
+      INSERT INTO users (
+        employee_id, name, email, phone, department, designation, 
+        joining_date, role, roles, password_hash, status, profile_photo_url,
+        job_status, provisional_start_date, provisional_end_date
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, 'active', $11, $12, $13, $14)
+      RETURNING id, employee_id as "employeeId", profile_photo_url as "profilePhotoUrl",
+                job_status as "jobStatus", provisional_start_date as "provisionalStartDate",
+                provisional_end_date as "provisionalEndDate", roles, role
     `;
-    const insertParams = [employeeCode, name, email, phone || null, department || null, designation || null, joiningDate || null, role, hashed, profilePhotoUrl || null];
+    const insertParams = [
+      employeeCode, name, email, phone || null, department || null, designation || null,
+      joiningDate || null, primaryRole, JSON.stringify(userRoles), hashed, profilePhotoUrl || null,
+      jobStatus || 'Permanent', provisionalStartDate || null, provisionalEndDate || null
+    ];
 
     const result = await client.query(insertQuery, insertParams);
 
@@ -230,7 +303,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
     try {
       await NotificationService.notifyAdmins({
         title: 'New Employee Registration',
-        message: `Employee ${name} (${result.rows[0].employeeId}) was registered in ${department || 'General'}.`,
+        message: `Employee ${name} (${result.rows[0].employeeId}) was registered in ${department || 'General'} [${jobStatus || 'Permanent'}].`,
         type: 'Employee',
         priority: 'Medium',
         actionUrl: '/employees',
@@ -239,7 +312,7 @@ export const createEmployee = async (req: AuthRequest, res: Response): Promise<v
       console.warn('Create employee notification error:', notifErr);
     }
 
-    res.json({ success: true, data: { id: result.rows[0].id, employeeId: result.rows[0].employeeId, profilePhotoUrl: result.rows[0].profilePhotoUrl, tempPassword: password ? 'User defined password' : tempPassword } });
+    res.json({ success: true, data: { id: result.rows[0].id, employeeId: result.rows[0].employeeId, profilePhotoUrl: result.rows[0].profilePhotoUrl, roles: result.rows[0].roles, role: result.rows[0].role, tempPassword: password ? 'User defined password' : tempPassword } });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('createEmployee error:', error);
@@ -258,7 +331,19 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
       return;
     }
 
-    const { name, email, phone, department, designation, joiningDate, role, profilePhotoUrl } = parsed.data;
+    const { name, email, phone, department, designation, joiningDate, role, roles, profilePhotoUrl, jobStatus, provisionalStartDate, provisionalEndDate } = parsed.data;
+
+    // Safety check: Prevent logged-in admin from accidentally removing their own admin role
+    if (req.user?.id === id) {
+      if (roles !== undefined && !roles.map((r: string) => r.toLowerCase()).includes('admin')) {
+        res.status(400).json({ success: false, error: { code: 'CANNOT_DEMOTE_SELF', message: 'You cannot remove the Administrator role from your own account.' } });
+        return;
+      }
+      if (role !== undefined && role.toLowerCase() !== 'admin' && roles === undefined) {
+        res.status(400).json({ success: false, error: { code: 'CANNOT_DEMOTE_SELF', message: 'You cannot remove the Administrator role from your own account.' } });
+        return;
+      }
+    }
 
     let updateQuery = 'UPDATE users SET updated_at = CURRENT_TIMESTAMP';
     const params: any[] = [];
@@ -276,7 +361,24 @@ export const editEmployee = async (req: AuthRequest, res: Response): Promise<voi
     addField(department, 'department');
     addField(designation, 'designation');
     addField(joiningDate, 'joining_date');
-    addField(role, 'role');
+
+    if (roles !== undefined && roles.length > 0) {
+      const userRoles = Array.from(new Set(roles.map(r => r.toLowerCase())));
+      const primaryRole = userRoles.includes('admin') ? 'admin' : 'employee';
+      params.push(JSON.stringify(userRoles));
+      updateQuery += `, roles = $${params.length}::jsonb`;
+      params.push(primaryRole);
+      updateQuery += `, role = $${params.length}`;
+    } else if (role !== undefined) {
+      const primaryRole = role.toLowerCase();
+      addField(primaryRole, 'role');
+      params.push(JSON.stringify([primaryRole]));
+      updateQuery += `, roles = $${params.length}::jsonb`;
+    }
+
+    addField(jobStatus, 'job_status');
+    addField(provisionalStartDate, 'provisional_start_date');
+    addField(provisionalEndDate, 'provisional_end_date');
 
     if (profilePhotoUrl !== undefined) {
       if (profilePhotoUrl === null || profilePhotoUrl === '') {
@@ -450,3 +552,304 @@ export const deleteEmployee = async (req: AuthRequest, res: Response): Promise<v
     res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to delete employee' } });
   }
 };
+
+const updateJobStatusSchema = z.object({
+  jobStatus: z.enum(['Provisional', 'Permanent']),
+  provisionalStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/).or(z.literal('')).nullable().optional(),
+  provisionalEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}/).or(z.literal('')).nullable().optional(),
+  reason: z.string().optional()
+});
+
+export const updateJobStatus = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id as string);
+    const parsed = updateJobStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.issues[0].message } });
+      return;
+    }
+
+    const { jobStatus, provisionalStartDate, provisionalEndDate, reason } = parsed.data;
+
+    const userRes = await query('SELECT id, name, email, employee_id, job_status, provisional_start_date, provisional_end_date FROM users WHERE id = $1', [id]);
+    if (userRes.rows.length === 0) {
+      res.status(404).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Employee not found' } });
+      return;
+    }
+
+    const currentUser = userRes.rows[0];
+
+    if (jobStatus === 'Permanent') {
+      await query(`
+        UPDATE users 
+        SET job_status = 'Permanent', updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $1
+      `, [id]);
+
+      // Notify employee
+      try {
+        await NotificationService.notifyUser(id, {
+          title: '🎉 Employment Confirmed',
+          message: `Congratulations ${currentUser.name}! Your employment status has been officially updated to Permanent.`,
+          type: 'Employee',
+          priority: 'High',
+          actionUrl: '/profile'
+        });
+      } catch (err) {
+        console.warn('Notify employee job status error:', err);
+      }
+
+      res.json({ success: true, message: 'Employee successfully confirmed as Permanent' });
+      return;
+    } else {
+      // Provisional status / extension
+      const pStart = provisionalStartDate ? provisionalStartDate.substring(0, 10) : currentUser.provisional_start_date;
+      const pEnd = provisionalEndDate ? provisionalEndDate.substring(0, 10) : currentUser.provisional_end_date;
+
+      await query(`
+        UPDATE users 
+        SET job_status = 'Provisional', 
+            provisional_start_date = COALESCE($1, provisional_start_date), 
+            provisional_end_date = $2, 
+            updated_at = CURRENT_TIMESTAMP 
+        WHERE id = $3
+      `, [pStart || null, pEnd || null, id]);
+
+      // Notify employee of extension / update
+      try {
+        const dateNote = pEnd ? ` until ${pEnd}` : '';
+        await NotificationService.notifyUser(id, {
+          title: 'Job Status Updated',
+          message: `Your provisional probation period has been updated${dateNote}.${reason ? ` Note: ${reason}` : ''}`,
+          type: 'Employee',
+          priority: 'Medium',
+          actionUrl: '/profile'
+        });
+      } catch (err) {
+        console.warn('Notify employee probation extension error:', err);
+      }
+
+      res.json({ success: true, message: 'Provisional period updated successfully' });
+      return;
+    }
+  } catch (error) {
+    console.error('updateJobStatus error:', error);
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to update job status' } });
+  }
+};
+
+export const exportEmployees = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const search = req.query.search as string;
+    const department = req.query.department as string;
+    const status = req.query.status as string;
+    const role = req.query.role as string;
+    const jobStatus = req.query.jobStatus as string;
+
+    let filterQuery = 'WHERE 1=1';
+    const queryParams: any[] = [];
+
+    if (search) {
+      queryParams.push(`%${search}%`);
+      filterQuery += ` AND (name ILIKE $${queryParams.length} OR employee_id ILIKE $${queryParams.length} OR email ILIKE $${queryParams.length})`;
+    }
+    if (department) {
+      queryParams.push(department);
+      filterQuery += ` AND department = $${queryParams.length}`;
+    }
+    if (status && status !== 'All') {
+      queryParams.push(status.toLowerCase());
+      filterQuery += ` AND status = $${queryParams.length}`;
+    }
+    if (role && role !== 'All') {
+      queryParams.push(role.toLowerCase());
+      filterQuery += ` AND role = $${queryParams.length}`;
+    }
+    if (jobStatus && jobStatus !== 'All') {
+      queryParams.push(jobStatus);
+      filterQuery += ` AND job_status = $${queryParams.length}`;
+    }
+
+    const usersRes = await query(`
+      SELECT employee_id as "employeeId", name, email, phone, department, 
+             designation, role, status,
+             COALESCE(job_status, 'Permanent') as "jobStatus",
+             provisional_start_date as "provisionalStartDate",
+             provisional_end_date as "provisionalEndDate",
+             joining_date as "joiningDate", created_at as "createdAt"
+      FROM users
+      ${filterQuery}
+      ORDER BY id ASC
+    `, queryParams);
+
+    const format = req.query.format === 'excel' ? 'excel' : 'csv';
+
+    if (format === 'excel') {
+      const ExcelJS = require('exceljs');
+      const { getCompanyLogoBuffer } = require('../utils/logoHelper');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'Falcon Info Solutions';
+      const sheet = workbook.addWorksheet('Employees Directory', {
+        views: [{ showGridLines: true }]
+      });
+
+      // Rows 1 to 5: Brand Header with Company Logo
+      sheet.getRow(1).height = 10;
+      sheet.getRow(2).height = 26;
+      sheet.getRow(3).height = 20;
+      sheet.getRow(4).height = 18;
+      sheet.getRow(5).height = 12;
+
+      const logoBuffer = getCompanyLogoBuffer();
+      if (logoBuffer) {
+        try {
+          const logoId = workbook.addImage({
+            buffer: logoBuffer as any,
+            extension: 'png'
+          });
+          sheet.addImage(logoId, {
+            tl: { col: 0.15, row: 1.1 },
+            ext: { width: 56, height: 56 }
+          });
+        } catch (e) {
+          console.error('Logo add error in exportEmployees:', e);
+        }
+      }
+
+      sheet.mergeCells('B2:L2');
+      const titleCell = sheet.getCell('B2');
+      titleCell.value = 'FALCON INFO SOLUTIONS';
+      titleCell.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: 'FF1E3A8A' } };
+      titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+
+      sheet.mergeCells('B3:L3');
+      const subCell = sheet.getCell('B3');
+      subCell.value = 'Employee Master Directory & Workforce Registry';
+      subCell.font = { name: 'Segoe UI', size: 11, bold: true, color: { argb: 'FF475569' } };
+      subCell.alignment = { vertical: 'middle', horizontal: 'left' };
+
+      sheet.mergeCells('B4:L4');
+      const metaCell = sheet.getCell('B4');
+      const genDate = new Date().toLocaleDateString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      });
+      metaCell.value = `Total Records: ${usersRes.rows.length}   |   Generated On: ${genDate}   |   Confidential HR Document`;
+      metaCell.font = { name: 'Segoe UI', size: 9.5, italic: true, color: { argb: 'FF64748B' } };
+      metaCell.alignment = { vertical: 'middle', horizontal: 'left' };
+
+      // Row 6: Table Headers
+      sheet.getRow(6).height = 28;
+      const headers = [
+        'Employee ID', 'Full Name', 'Email', 'Phone', 'Department',
+        'Designation', 'Role', 'Account Status', 'Job Status',
+        'Provisional Start', 'Provisional End', 'Joining Date'
+      ];
+      const colWidths = [16, 24, 28, 16, 20, 22, 14, 14, 16, 18, 18, 16];
+
+      headers.forEach((h, idx) => {
+        const cell = sheet.getRow(6).getCell(idx + 1);
+        cell.value = h;
+        cell.font = { name: 'Segoe UI', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = {
+          top: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+          bottom: { style: 'medium', color: { argb: 'FF1E3A8A' } },
+          left: { style: 'thin', color: { argb: 'FF3B82F6' } },
+          right: { style: 'thin', color: { argb: 'FF3B82F6' } }
+        };
+      });
+
+      colWidths.forEach((w, idx) => {
+        sheet.getColumn(idx + 1).width = w;
+      });
+
+      let rowIdx = 7;
+      for (const row of usersRes.rows) {
+        const r = sheet.getRow(rowIdx);
+        const isEven = (rowIdx % 2 === 0);
+        const rowBg = isEven ? 'FFFFFFFF' : 'FFF8FAFC';
+
+        const rowValues = [
+          row.employeeId || '',
+          row.name || '',
+          row.email || '',
+          row.phone || '',
+          row.department || '',
+          row.designation || '',
+          row.role || '',
+          row.status || '',
+          row.jobStatus || '',
+          row.provisionalStartDate ? new Date(row.provisionalStartDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '',
+          row.provisionalEndDate ? new Date(row.provisionalEndDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '',
+          row.joiningDate ? new Date(row.joiningDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '',
+        ];
+
+        rowValues.forEach((val, cIdx) => {
+          const cell = r.getCell(cIdx + 1);
+          cell.value = val;
+          cell.font = { name: 'Segoe UI', size: 9.5, color: { argb: 'FF0F172A' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBg } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+            right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
+          };
+          if (cIdx === 1) cell.font = { name: 'Segoe UI', size: 9.5, bold: true, color: { argb: 'FF0F172A' } };
+          if (cIdx === 0 || cIdx >= 6) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          else cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        });
+
+        r.height = 22;
+        rowIdx++;
+      }
+
+      sheet.autoFilter = { from: 'A6', to: 'L6' };
+      sheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 6, showGridLines: true }];
+
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename=Falcon_Employees_${new Date().toISOString().substring(0, 10)}.xlsx`);
+      await workbook.xlsx.write(res);
+      res.end();
+      return;
+    } else {
+      const headers = ['Employee ID', 'Full Name', 'Email', 'Phone', 'Department', 'Designation', 'Role', 'Account Status', 'Job Status', 'Provisional Start Date', 'Provisional End Date', 'Joining Date'];
+      let csv = headers.map(h => `"${h}"`).join(',') + '\n';
+
+      for (const r of usersRes.rows) {
+        const jDate = r.joiningDate ? new Date(r.joiningDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '';
+        const pStart = r.provisionalStartDate ? new Date(r.provisionalStartDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '';
+        const pEnd = r.provisionalEndDate ? new Date(r.provisionalEndDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) : '';
+
+        const line = [
+          r.employeeId || '',
+          r.name || '',
+          r.email || '',
+          r.phone || '',
+          r.department || '',
+          r.designation || '',
+          r.role || '',
+          r.status || '',
+          r.jobStatus || '',
+          pStart,
+          pEnd,
+          jDate
+        ].map(val => `"${String(val).replace(/"/g, '""')}"`).join(',');
+        csv += line + '\n';
+      }
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', `attachment; filename=Falcon_Employees_${new Date().toISOString().substring(0, 10)}.csv`);
+      res.status(200).send(csv);
+      return;
+    }
+  } catch (error) {
+    console.error('exportEmployees error:', error);
+    res.status(500).json({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Failed to export employees' } });
+  }
+};
+

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { query } from '../db';
 import { CalculatedPayrollItem } from './payrollCalculationService';
+import { getCompanyLogoPath } from '../utils/logoHelper';
 
 function numberToIndianWords(num: number): string {
   if (num === 0) return 'Zero Rupees';
@@ -80,8 +81,8 @@ export class SalarySlipService {
     const lastDayOfMonth = new Date(year, month, 0).getDate();
     const payPeriod = `01-${monthShort}-${String(year).slice(-2)} to ${lastDayOfMonth}-${monthShort}-${String(year).slice(-2)}`;
 
-    const logoPath = path.join(process.cwd(), 'assets', 'falcon_logo.png');
-    const hasLogo = fs.existsSync(logoPath);
+    const logoPath = getCompanyLogoPath();
+    const hasLogo = !!(logoPath && fs.existsSync(logoPath));
 
     await new Promise<void>((resolve, reject) => {
       const doc = new PDFDocument({ margin: 36, size: 'A4' });
@@ -354,54 +355,17 @@ export class SalarySlipService {
       doc.fillColor('#FFFFFF').fontSize(15).font('Helvetica-Bold')
         .text(`INR ${item.net_salary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, leftMargin + 320, y + 12, { width: 190, align: 'right' });
 
-      y += netSalaryH + 8;
+      y += netSalaryH + 24;
 
-      // ==================== 6. TRIPLE SUMMARY CARDS ====================
-      const cardW = 169;
-      const cardH = 34;
-
-      // Card 1: Total Gross Earnings
-      doc.rect(leftMargin, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-      doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-        .text('TOTAL GROSS EARNINGS', leftMargin + 8, y + 6);
-      doc.fillColor(cPrimaryNavy).fontSize(10).font('Helvetica-Bold')
-        .text(`INR ${item.gross_pay.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, leftMargin + 8, y + 18);
-
-      // Card 2: Total Deductions
-      const card2X = leftMargin + cardW + 8;
-      doc.rect(card2X, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-      doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-        .text('TOTAL DEDUCTIONS', card2X + 8, y + 6);
-      doc.fillColor('#DC2626').fontSize(10).font('Helvetica-Bold')
-        .text(`INR ${item.total_deductions.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, card2X + 8, y + 18);
-
-      // Card 3: Total CTC Monthly
-      const card3X = card2X + cardW + 8;
-      const totalMonthlyCTC = item.base_monthly_salary || (item.gross_pay + totalCTCContrib);
-      doc.rect(card3X, y, cardW, cardH).fill(cBgLightBlue).stroke(cBorderBlue);
-      doc.fillColor(cTextMuted).fontSize(7).font('Helvetica')
-        .text('TOTAL CTC (MONTHLY)', card3X + 8, y + 6);
-      doc.fillColor(cPrimaryNavy).fontSize(10).font('Helvetica-Bold')
-        .text(`INR ${totalMonthlyCTC.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`, card3X + 8, y + 18);
-
-      y += cardH + 16;
-
-      // ==================== 7. SIGNATURES ====================
+      // ==================== 6. SIGNATURE ====================
       const sigLineW = 180;
-      // Employee Signature
-      doc.moveTo(leftMargin + 10, y + 26).lineTo(leftMargin + 10 + sigLineW, y + 26).stroke(cTextMuted);
-      doc.fillColor(cTextDark).fontSize(8).font('Helvetica-Bold')
-        .text('Employee Signature', leftMargin + 10, y + 30, { width: sigLineW, align: 'center' });
-
       // Authorized Signatory
       const authSigX = leftMargin + contentWidth - sigLineW - 10;
-      doc.moveTo(authSigX, y + 26).lineTo(authSigX + sigLineW, y + 26).stroke(cTextMuted);
+      doc.moveTo(authSigX, y + 30).lineTo(authSigX + sigLineW, y + 30).stroke(cTextMuted);
       doc.fillColor(cTextDark).fontSize(8).font('Helvetica-Bold')
-        .text('For Falcon Info Solutions Pvt. Ltd.', authSigX, y + 6, { width: sigLineW, align: 'center' });
-      doc.fillColor(cTextMuted).fontSize(7.5).font('Helvetica')
-        .text('Authorized Signatory', authSigX, y + 30, { width: sigLineW, align: 'center' });
+        .text('Authorized Signatory', authSigX, y + 34, { width: sigLineW, align: 'center' });
 
-      y += 50;
+      y += 58;
 
       // ==================== 8. CONFIDENTIALITY NOTE ====================
       doc.rect(leftMargin, y, contentWidth, 32).fill(cBgLightBlue).stroke(cBorderBlue);

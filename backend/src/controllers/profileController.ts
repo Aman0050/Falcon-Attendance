@@ -22,7 +22,11 @@ export const getProfile = async (req: AuthRequest, res: Response): Promise<void>
     const userId = req.user!.id;
     const userRes = await query(`
       SELECT id, employee_id as "employeeId", name, email, phone, department, 
-             designation, joining_date as "joiningDate", status, role, profile_photo_url as "profilePhotoUrl"
+             designation, joining_date as "joiningDate", status, role,
+             COALESCE(job_status, 'Permanent') as "jobStatus",
+             provisional_start_date as "provisionalStartDate",
+             provisional_end_date as "provisionalEndDate",
+             profile_photo_url as "profilePhotoUrl"
       FROM users WHERE id = $1
     `, [userId]);
 
@@ -34,6 +38,26 @@ export const getProfile = async (req: AuthRequest, res: Response): Promise<void>
     const rec = userRes.rows[0];
     if (rec.joiningDate) {
       rec.joiningDate = new Date(rec.joiningDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    }
+    if (rec.provisionalStartDate) {
+      rec.provisionalStartDate = new Date(rec.provisionalStartDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    }
+    if (rec.provisionalEndDate) {
+      rec.provisionalEndDate = new Date(rec.provisionalEndDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+      const today = new Date();
+      const end = new Date(rec.provisionalEndDate);
+      const diffTime = end.getTime() - today.getTime();
+      rec.daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    } else {
+      rec.daysRemaining = null;
+    }
+
+    if (rec.profilePhotoUrl && typeof rec.profilePhotoUrl === 'string' && rec.profilePhotoUrl.startsWith('/')) {
+      const host = req.get('host');
+      if (host) {
+        rec.profilePhotoUrl = `${req.protocol}://${host}${rec.profilePhotoUrl}`;
+      }
     }
 
     res.json({ success: true, data: rec });

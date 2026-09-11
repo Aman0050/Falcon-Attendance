@@ -69,13 +69,19 @@ export default function HomeScreen() {
         Alert.alert('Success', action === 'check-in' ? 'Attendance marked successfully!' : 'Checked out successfully!');
         loadAttendance();
       } else {
-        Alert.alert(
-          action === 'check-in' ? 'Attendance Not Marked' : 'Checkout Failed',
-          result.error?.message || 'Verification failed. Please ensure you are within the designated office boundary.'
+        const errorTitle = action === 'check-in' ? 'Check-In Outside Permitted Area' : 'Check-Out Outside Permitted Area';
+        const errorMsg = result.error?.message || (
+          result.data?.distanceMeters !== undefined
+            ? `You are outside the permitted office location (${result.data.distanceMeters}m away). Attendance is only allowed within ${result.data.allowedRadiusMeters || 25} metres of the office.`
+            : 'Verification failed. Please ensure you are physically within the 25-metre office radius.'
         );
+        Alert.alert(errorTitle, errorMsg);
       }
     } catch (err: any) {
-      Alert.alert('Location Verification Failed', err.message || 'Unable to fetch your current GPS position.');
+      Alert.alert(
+        'Location Verification Failed',
+        err.message || 'Unable to fetch your current GPS position. Please ensure location services and high-accuracy GPS are enabled.'
+      );
     } finally {
       setActionLoading(false);
     }
@@ -147,53 +153,7 @@ export default function HomeScreen() {
     timeZone: 'Asia/Kolkata',
   });
 
-  if (user?.role?.toLowerCase() === 'admin') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.topBar}>
-          <View style={styles.userRow}>
-            <View style={styles.avatarRing}>
-              <Text style={styles.avatarLetter}>{user?.name?.charAt(0).toUpperCase() || 'A'}</Text>
-            </View>
-            <View>
-              <Text style={styles.greetingText}>{greeting},</Text>
-              <Text style={styles.userNameText}>{user?.name || 'Administrator'}</Text>
-            </View>
-          </View>
-          <View style={styles.topActions}>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => navigation.navigate('Notifications')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="notifications-outline" size={20} color="#334155" />
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.iconButton, { marginLeft: 8 }]} onPress={logout} activeOpacity={0.7}>
-              <Ionicons name="log-out-outline" size={20} color="#EF4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.adminHero}>
-          <View style={styles.adminIconBox}>
-            <Ionicons name="shield-checkmark" size={48} color="#2563EB" />
-          </View>
-          <Text style={styles.adminTitle}>Admin Portal</Text>
-          <Text style={styles.adminDesc}>
-            As an organization administrator, your daily attendance is not tracked. Use the Admin tab below to monitor employee real-time activity, review attendance logs, and manage requests.
-          </Text>
-          <TouchableOpacity
-            style={styles.adminActionBtn}
-            onPress={() => navigation.navigate('Admin')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="apps" size={18} color="#FFFFFF" style={{ marginRight: 8 }} />
-            <Text style={styles.adminActionText}>Open Admin Dashboard</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -212,11 +172,20 @@ export default function HomeScreen() {
         <View style={styles.topBar}>
           <View style={styles.userRow}>
             <View style={styles.avatarRing}>
-              <Text style={styles.avatarLetter}>{user?.name?.charAt(0).toUpperCase() || 'E'}</Text>
+              <Text style={styles.avatarLetter}>
+                {user?.name?.charAt(0).toUpperCase() || (isAdmin ? 'A' : 'E')}
+              </Text>
             </View>
             <View>
               <Text style={styles.greetingText}>{greeting},</Text>
-              <Text style={styles.userNameText}>{user?.name || 'Employee'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.userNameText}>{user?.name || (isAdmin ? 'Administrator' : 'Employee')}</Text>
+                {isAdmin && (
+                  <View style={{ marginLeft: 6, backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 1, borderColor: '#BFDBFE' }}>
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#2563EB' }}>ADMIN</Text>
+                  </View>
+                )}
+              </View>
             </View>
           </View>
 
@@ -233,6 +202,24 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Admin Quick Console Bar */}
+        {isAdmin && (
+          <View style={styles.adminBanner}>
+            <View style={styles.adminBannerLeft}>
+              <Ionicons name="shield-checkmark" size={16} color="#2563EB" />
+              <Text style={styles.adminBannerText}>Admin Attendance Enabled</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.adminBannerBtn}
+              onPress={() => navigation.navigate('Admin')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.adminBannerBtnText}>Admin Console</Text>
+              <Ionicons name="chevron-forward" size={12} color="#FFFFFF" style={{ marginLeft: 2 }} />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Date & Shift Pill Banner */}
         <View style={styles.bannerRow}>
@@ -253,9 +240,15 @@ export default function HomeScreen() {
               <Text style={styles.heroClockTime}>{currentTimeFormatted}</Text>
               <Text style={styles.heroClockLabel}>Office Hours: 09:00 AM - 07:00 PM</Text>
             </View>
-            <View style={styles.gpsIndicator}>
-              <View style={styles.gpsDot} />
-              <Text style={styles.gpsText}>GPS Active</Text>
+            <View style={{ alignItems: 'flex-end', gap: 4 }}>
+              <View style={styles.gpsIndicator}>
+                <View style={styles.gpsDot} />
+                <Text style={styles.gpsText}>GPS Active</Text>
+              </View>
+              <View style={styles.geoFenceBadge}>
+                <Ionicons name="navigate-outline" size={10} color="#1D4ED8" />
+                <Text style={styles.geoFenceBadgeText}>25m Radius</Text>
+              </View>
             </View>
           </View>
 
@@ -326,6 +319,10 @@ export default function HomeScreen() {
                   </Text>
                 </View>
               )}
+
+              <Text style={styles.geoFenceFootnote}>
+                📍 Attendance permitted within 25 metres of Falcon office
+              </Text>
             </View>
           )}
         </View>
@@ -381,6 +378,21 @@ export default function HomeScreen() {
         {/* Quick Navigation Cards */}
         <Text style={styles.sectionHeader}>Quick Services</Text>
         <View style={styles.servicesRow}>
+          <TouchableOpacity
+            style={styles.serviceCard}
+            onPress={() => navigation.navigate('Leave')}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.serviceIconCircle, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="calendar-clear" size={22} color="#D97706" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.serviceTitle}>Leave Requests</Text>
+              <Text style={styles.serviceDesc}>Apply for leaves & track balances</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+          </TouchableOpacity>
+
           <TouchableOpacity
             style={styles.serviceCard}
             onPress={() => navigation.navigate('History')}
@@ -575,6 +587,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#15803D',
     fontWeight: '600',
+  },
+  geoFenceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+  },
+  geoFenceBadgeText: {
+    fontSize: 10,
+    color: '#1D4ED8',
+    fontWeight: '700',
+    marginLeft: 3,
+  },
+  geoFenceFootnote: {
+    textAlign: 'center',
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 10,
+    fontWeight: '500',
   },
   heroDivider: {
     height: 1,
@@ -776,52 +811,40 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 2,
   },
-  adminHero: {
-    flex: 1,
-    justifyContent: 'center',
+  adminBanner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    padding: 24,
-  },
-  adminIconBox: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    justifyContent: 'space-between',
     backgroundColor: '#EFF6FF',
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: '#BFDBFE',
-    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  adminBannerLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    flex: 1,
   },
-  adminTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 10,
+  adminBannerText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#1D4ED8',
+    marginLeft: 6,
   },
-  adminDesc: {
-    fontSize: 15,
-    color: '#64748B',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  adminActionBtn: {
+  adminBannerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#2563EB',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 14,
-    shadowColor: '#2563EB',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
   },
-  adminActionText: {
+  adminBannerBtnText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 11.5,
     fontWeight: '700',
   },
 });

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Modal, Form, Spinner } from 'react-bootstrap';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import NotificationPreferencesModal from '../components/common/NotificationPreferencesModal';
 import {
   Bell,
   Search,
@@ -24,7 +25,9 @@ import {
   Mail,
   Smartphone,
   Eye,
-  EyeOff
+  EyeOff,
+  Megaphone,
+  Send
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -76,19 +79,27 @@ export default function NotificationsPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [typeFilter, setTypeFilter] = useState<string>('all');
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Preferences Modal
   const [showPrefModal, setShowPrefModal] = useState<boolean>(false);
-  const [preferences, setPreferences] = useState<PreferencesData>({
-    in_app_enabled: true,
-    push_enabled: true,
-    email_enabled: true,
-    attendance_alerts: true,
-    leave_alerts: true,
-    payroll_alerts: true,
-    announcements: true
-  });
-  const [savingPrefs, setSavingPrefs] = useState<boolean>(false);
-  const [prefSaveSuccess, setPrefSaveSuccess] = useState<boolean>(false);
+
+  // Broadcast Modal State
+  const [showBroadcastModal, setShowBroadcastModal] = useState<boolean>(false);
+  const [broadcastTitle, setBroadcastTitle] = useState<string>('📢 Company Announcement');
+  const [broadcastMessage, setBroadcastMessage] = useState<string>('The office will remain closed on 2 October due to Gandhi Jayanti.');
+  const [broadcastPriority, setBroadcastPriority] = useState<'Medium' | 'High' | 'Critical'>('High');
+  const [broadcasting, setBroadcasting] = useState<boolean>(false);
+  const [broadcastSuccess, setBroadcastSuccess] = useState<boolean>(false);
+
+  // Auto-open preferences modal if URL has ?preferences=true
+  useEffect(() => {
+    if (searchParams.get('preferences') === 'true') {
+      setShowPrefModal(true);
+      searchParams.delete('preferences');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Debounce search input
   useEffect(() => {
@@ -140,43 +151,34 @@ export default function NotificationsPage() {
     fetchNotifications();
   }, [fetchNotifications]);
 
-  // Fetch Preferences
-  const fetchPreferences = async () => {
-    if (!token) return;
-    try {
-      const res = await axios.get(`${API_BASE}/api/notifications/preferences`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.data.success && res.data.data) {
-        setPreferences(res.data.data);
-      }
-    } catch (err) {
-      console.error('Error fetching preferences:', err);
-    }
-  };
-
   const handleOpenPreferences = () => {
-    fetchPreferences();
-    setPrefSaveSuccess(false);
     setShowPrefModal(true);
   };
 
-  const handleSavePreferences = async () => {
-    if (!token) return;
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastMessage.trim() || !token) return;
+
     try {
-      setSavingPrefs(true);
-      await axios.patch(`${API_BASE}/api/notifications/preferences`, preferences, {
+      setBroadcasting(true);
+      await axios.post(`${API_BASE}/api/notifications/broadcast`, {
+        title: broadcastTitle.trim() || '📢 Company Announcement',
+        message: broadcastMessage.trim(),
+        priority: broadcastPriority,
+        target: 'employee'
+      }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      setPrefSaveSuccess(true);
+      setBroadcastSuccess(true);
+      fetchNotifications(true);
       setTimeout(() => {
-        setShowPrefModal(false);
-        setPrefSaveSuccess(false);
+        setBroadcastSuccess(false);
+        setShowBroadcastModal(false);
       }, 1200);
-    } catch (err) {
-      console.error('Error saving preferences:', err);
+    } catch (err: any) {
+      console.error('Broadcast failed:', err);
     } finally {
-      setSavingPrefs(false);
+      setBroadcasting(false);
     }
   };
 
@@ -405,6 +407,23 @@ export default function NotificationsPage() {
               <span>Mark all read</span>
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowBroadcastModal(true)}
+            className="btn btn-dark d-flex align-items-center gap-1.5 text-white"
+            style={{
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '8px',
+              padding: '7px 14px',
+              backgroundColor: '#0F172A',
+              borderColor: '#0F172A'
+            }}
+          >
+            <Megaphone size={14} />
+            <span>Broadcast</span>
+          </button>
 
           <button
             type="button"
@@ -854,155 +873,93 @@ export default function NotificationsPage() {
       </div>
 
       {/* Notification Preferences Modal */}
-      <Modal show={showPrefModal} onHide={() => setShowPrefModal(false)} centered>
+      <NotificationPreferencesModal
+        show={showPrefModal}
+        onHide={() => setShowPrefModal(false)}
+      />
+
+      {/* Broadcast Announcement Modal */}
+      <Modal show={showBroadcastModal} onHide={() => setShowBroadcastModal(false)} centered>
         <Modal.Header closeButton style={{ borderBottom: '1px solid #E2E8F0' }}>
           <Modal.Title style={{ fontSize: '16px', fontWeight: 700, color: '#0F172A' }}>
-            Notification Preferences
+            Broadcast Company Announcement
           </Modal.Title>
         </Modal.Header>
 
-        <Modal.Body className="p-4">
-          <p className="text-muted small mb-4">
-            Customize which alerts and channels you wish to receive notifications from.
-          </p>
+        <form onSubmit={handleBroadcast}>
+          <Modal.Body className="p-4">
+            <p className="text-muted small mb-3">
+              Send an instant push notification and announcement to all employee mobile devices and web consoles.
+            </p>
 
-          {/* Delivery Channels */}
-          <div className="mb-4">
-            <h3 className="text-uppercase text-muted fw-bold mb-2.5" style={{ fontSize: '11px', letterSpacing: '0.06em' }}>
-              Delivery Channels
-            </h3>
-            <div className="d-flex flex-column gap-3 p-3 rounded-3" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-              <div className="d-flex align-items-center justify-content-between">
-                <div className="d-flex align-items-center gap-2">
-                  <Bell size={16} className="text-primary" />
-                  <div>
-                    <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>In-App Notifications</div>
-                    <div className="text-muted" style={{ fontSize: '11.5px' }}>Desktop bell alerts and indicator badges</div>
-                  </div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.in_app_enabled}
-                  onChange={(e) => setPreferences({ ...preferences, in_app_enabled: e.target.checked })}
-                />
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                <div className="d-flex align-items-center gap-2">
-                  <Smartphone size={16} className="text-success" />
-                  <div>
-                    <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Push Notifications</div>
-                    <div className="text-muted" style={{ fontSize: '11.5px' }}>Mobile push alerts on connected devices</div>
-                  </div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.push_enabled}
-                  onChange={(e) => setPreferences({ ...preferences, push_enabled: e.target.checked })}
-                />
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                <div className="d-flex align-items-center gap-2">
-                  <Mail size={16} className="text-info" />
-                  <div>
-                    <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Email Notifications</div>
-                    <div className="text-muted" style={{ fontSize: '11.5px' }}>Important announcements & summaries via email</div>
-                  </div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.email_enabled}
-                  onChange={(e) => setPreferences({ ...preferences, email_enabled: e.target.checked })}
-                />
-              </div>
+            <div className="mb-3">
+              <label className="form-label small fw-semibold text-dark">Announcement Title</label>
+              <input
+                type="text"
+                className="form-control"
+                value={broadcastTitle}
+                onChange={(e) => setBroadcastTitle(e.target.value)}
+                placeholder="e.g. 📢 Company Announcement"
+                required
+              />
             </div>
-          </div>
 
-          {/* Event Categories */}
-          <div>
-            <h3 className="text-uppercase text-muted fw-bold mb-2.5" style={{ fontSize: '11px', letterSpacing: '0.06em' }}>
-              Alert Categories
-            </h3>
-            <div className="d-flex flex-column gap-3 p-3 rounded-3" style={{ background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-              <div className="d-flex align-items-center justify-content-between">
-                <div>
-                  <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Attendance Alerts</div>
-                  <div className="text-muted" style={{ fontSize: '11.5px' }}>Late check-in, checkout reminders, marked absent</div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.attendance_alerts}
-                  onChange={(e) => setPreferences({ ...preferences, attendance_alerts: e.target.checked })}
-                />
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                <div>
-                  <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Leave Management</div>
-                  <div className="text-muted" style={{ fontSize: '11.5px' }}>Leave applications, approvals, and rejections</div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.leave_alerts}
-                  onChange={(e) => setPreferences({ ...preferences, leave_alerts: e.target.checked })}
-                />
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                <div>
-                  <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Payroll & Salary</div>
-                  <div className="text-muted" style={{ fontSize: '11.5px' }}>Monthly salary slip releases and deductions</div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.payroll_alerts}
-                  onChange={(e) => setPreferences({ ...preferences, payroll_alerts: e.target.checked })}
-                />
-              </div>
-
-              <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                <div>
-                  <div className="fw-semibold text-dark" style={{ fontSize: '13px' }}>Company Announcements</div>
-                  <div className="text-muted" style={{ fontSize: '11.5px' }}>General circulars, holidays, and broadcasts</div>
-                </div>
-                <Form.Check
-                  type="switch"
-                  checked={preferences.announcements}
-                  onChange={(e) => setPreferences({ ...preferences, announcements: e.target.checked })}
-                />
-              </div>
+            <div className="mb-3">
+              <label className="form-label small fw-semibold text-dark">Message</label>
+              <textarea
+                className="form-control"
+                rows={3}
+                value={broadcastMessage}
+                onChange={(e) => setBroadcastMessage(e.target.value)}
+                placeholder="The office will remain closed on 2 October due to Gandhi Jayanti."
+                required
+              />
             </div>
-          </div>
 
-          {prefSaveSuccess && (
-            <div className="alert alert-success d-flex align-items-center gap-2 mt-3 mb-0 p-2.5" style={{ fontSize: '12.5px' }}>
-              <CheckCircle2 size={16} />
-              <span>Preferences updated successfully!</span>
+            <div className="mb-2">
+              <label className="form-label small fw-semibold text-dark">Priority</label>
+              <select
+                className="form-select"
+                value={broadcastPriority}
+                onChange={(e) => setBroadcastPriority(e.target.value as any)}
+              >
+                <option value="Medium">Medium</option>
+                <option value="High">High (Recommended)</option>
+                <option value="Critical">Critical (Bypasses category filters)</option>
+              </select>
             </div>
-          )}
-        </Modal.Body>
 
-        <Modal.Footer style={{ borderTop: '1px solid #E2E8F0' }}>
-          <button
-            type="button"
-            onClick={() => setShowPrefModal(false)}
-            className="btn btn-light"
-            style={{ borderRadius: '8px', fontSize: '13px' }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSavePreferences}
-            disabled={savingPrefs}
-            className="btn btn-primary d-flex align-items-center gap-1.5"
-            style={{ borderRadius: '8px', fontSize: '13px', fontWeight: 600 }}
-          >
-            {savingPrefs ? <Spinner animation="border" size="sm" /> : <CheckCheck size={15} />}
-            <span>Save Preferences</span>
-          </button>
-        </Modal.Footer>
+            {broadcastSuccess && (
+              <div
+                className="alert alert-success d-flex align-items-center gap-2 mt-3 mb-0 p-2.5"
+                style={{ fontSize: '12.5px' }}
+              >
+                <CheckCircle2 size={16} />
+                <span>Announcement broadcasted and sent to all devices!</span>
+              </div>
+            )}
+          </Modal.Body>
+
+          <Modal.Footer style={{ borderTop: '1px solid #E2E8F0' }}>
+            <button
+              type="button"
+              onClick={() => setShowBroadcastModal(false)}
+              className="btn btn-light"
+              style={{ borderRadius: '8px', fontSize: '13px' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={broadcasting || !broadcastMessage.trim()}
+              className="btn btn-primary d-flex align-items-center gap-1.5"
+              style={{ borderRadius: '8px', fontSize: '13px', fontWeight: 600, backgroundColor: '#2563EB' }}
+            >
+              {broadcasting ? <Spinner animation="border" size="sm" /> : <Send size={14} />}
+              <span>Send Broadcast</span>
+            </button>
+          </Modal.Footer>
+        </form>
       </Modal>
     </div>
   );

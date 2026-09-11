@@ -186,7 +186,7 @@ async function checkAndSendLateAttendanceAlerts(overrideDateStr) {
     const employeesRes = await (0, db_1.query)(`
     SELECT u.id, u.name, u.employee_id as "employeeId", u.department
     FROM users u
-    WHERE u.status = 'active' AND LOWER(u.role) = 'employee'
+    WHERE u.status = 'active' AND LOWER(u.role) IN ('employee', 'admin')
     ORDER BY u.name ASC
   `);
     const activeEmployees = employeesRes.rows;

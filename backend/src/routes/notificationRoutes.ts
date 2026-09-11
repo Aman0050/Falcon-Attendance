@@ -9,6 +9,7 @@ import {
   updatePreferences,
   registerPushToken,
   notificationStream,
+  broadcastAnnouncement,
 } from '../controllers/notificationController';
 import { authenticateToken } from '../middlewares/auth';
 
@@ -36,5 +37,8 @@ router.patch('/preferences', updatePreferences);
 
 // Push Tokens
 router.post('/push-token', registerPushToken);
+
+// Broadcast Announcement (Admin only)
+router.post('/broadcast', broadcastAnnouncement);
 
 export default router;
