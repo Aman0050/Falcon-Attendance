@@ -32,6 +32,7 @@ export async function registerForPushNotificationsAsync(authToken: string): Prom
         sound: 'default',
         enableVibrate: true,
         showBadge: true,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
 
@@ -65,7 +66,8 @@ export async function registerForPushNotificationsAsync(authToken: string): Prom
     console.log('[Push] Registered Expo Push Token:', pushToken);
 
     // 5. Send push token to backend
-    await registerPushToken(pushToken, Platform.OS, authToken);
+    const regResult = await registerPushToken(pushToken, Platform.OS, authToken);
+    console.log('[Push] Registered push token on backend result:', regResult);
 
     return pushToken;
   } catch (error) {

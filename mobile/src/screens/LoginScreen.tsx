@@ -44,11 +44,12 @@ export default function LoginScreen() {
       const { token, user } = response.data;
       await login(token, user);
     } catch (error: any) {
+      console.error('Login error:', error);
       const message =
         error.response?.data?.error?.message ||
-        error.response?.data?.error ||
+        (typeof error.response?.data?.error === 'string' ? error.response?.data?.error : null) ||
         error.response?.data?.message ||
-        'Unable to sign in. Please verify your credentials.';
+        (error.message ? `Connection error: ${error.message}` : 'Unable to sign in. Please verify your credentials.');
       Alert.alert('Authentication Failed', message);
     } finally {
       setLoading(false);
