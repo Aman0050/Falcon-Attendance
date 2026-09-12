@@ -275,8 +275,9 @@ export class PayrollController {
       const month = parseInt(req.params.month as string);
 
       const cycleRes = await query('SELECT * FROM payroll_cycles WHERE year = $1 AND month = $2', [year, month]);
-      if (cycleRes.rows.length === 0) {
-        // Return preview directly
+
+      // If no cycle exists yet, or the cycle is in DRAFT state, return a live preview
+      if (cycleRes.rows.length === 0 || cycleRes.rows[0].status !== 'FINALIZED') {
         const preview = await PayrollCalculationService.calculateCyclePreview(year, month);
         res.json({ success: true, isFinalized: false, data: preview });
         return;
